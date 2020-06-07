@@ -67,6 +67,11 @@ class Dataset:
     def __init__(self):
         self.vocabulary = []
         self.classifiers = {}
+        self.total_word_count_foreach_class = {}
+        self.conditional_probabilities = {}
+        self.probabilities_classes = {}
+        self.total_documents = 0
+        self.num_docs_per_classifier = {}
 
     def display_vocabulary(self):
         for word in self.vocabulary:
@@ -76,6 +81,15 @@ class Dataset:
         for classifier in self.classifiers:
             print(classifier, end=', ')
 
+    def display_conditional_probabilities(self):
+        for p in self.conditional_probabilities:
+            print(p, end=': ')
+            print(self.conditional_probabilities[p], end=', ')
+
+    def display_probabilities_classes(self):
+        for p in self.probabilities_classes:
+            print(p, end=': ')
+            print(self.probabilities_classes[p], end=', ')
 
 
 class NaiveBayesianClassifier:
@@ -85,10 +99,33 @@ class NaiveBayesianClassifier:
         self.dataset_model = Dataset()
         self.dataset_test = Dataset()
 
+    def calculate_conditional_probability(self, word, classifier):
+        # P(word | classifier) = freq of word in classifier / total words in classifier
+        word_count = self.dataset_model.classifiers[classifier][word]
+        total_word_count = self.dataset_model.total_word_count_foreach_class[classifier]
+
+        # return cond probability with smoothing
+        return (word_count + BAYESIAN_SMOOTHING_VALUE) / (total_word_count + len(self.dataset_model.vocabulary))
+
+    def calculate_classifier_probability(self, classifier):
+        return self.dataset_model.num_docs_per_classifier[classifier] / self.dataset_model.total_documents
+
+
+    def train_dataset_model(self):
+        for classifier in self.dataset_model.classifiers:
+            for word in self.dataset_model.vocabulary:
+                self.dataset_model.conditional_probabilities[word] \
+                    = self.calculate_conditional_probability(word, classifier)
+            self.dataset_model.probabilities_classes[classifier] = self.calculate_classifier_probability(classifier)
+
+
     def generate_frequency_maps(self, dataset, classifier, words):
         # add the classifier to the model if does not exist yet
         if classifier not in dataset.classifiers:
             dataset.classifiers[classifier] = {}
+
+        if classifier not in dataset.total_word_count_foreach_class:
+            dataset.total_word_count_foreach_class[classifier] = 0
         
         for word in words:
             #  add the word to the vocabulary for the model
@@ -101,6 +138,9 @@ class NaiveBayesianClassifier:
             else:
                 current_freq = dataset.classifiers[classifier][word]
                 dataset.classifiers[classifier][word] = current_freq + 1
+
+            total_word_count = dataset.total_word_count_foreach_class[classifier]
+            dataset.total_word_count_foreach_class[classifier] = total_word_count + 1
 
     def read_csv_data(self):
 
@@ -141,6 +181,12 @@ class NaiveBayesianClassifier:
 
                     # determine the frequency of each word for each classifier
                     if year == DATASET_MODEL_YEAR:
+                        if classifier not in self.dataset_model.num_docs_per_classifier:
+                            self.dataset_model.num_docs_per_classifier[classifier] = 1
+                        else:
+                            current_num_docs = self.dataset_model.num_docs_per_classifier[classifier]
+                            self.dataset_model.num_docs_per_classifier[classifier] = current_num_docs + 1
+
                         self.generate_frequency_maps(self.dataset_model, classifier, words)
 
                     elif year == DATASET_TEST_YEAR:
@@ -148,7 +194,7 @@ class NaiveBayesianClassifier:
 
                     current_row += 1
 
-            print('Processed ' + str(current_row)  + ' lines.')
+            self.dataset_model.total_documents = current_row
 
 
 def main():
