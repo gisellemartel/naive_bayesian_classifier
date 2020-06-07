@@ -6,8 +6,8 @@
 # --------------------------------------------------------
 
 import csv
-import nltk
 import ssl
+import nltk
 
 try:
     _create_unverified_https_context = ssl._create_unverified_context
@@ -17,6 +17,8 @@ else:
     ssl._create_default_https_context = _create_unverified_https_context
 if not nltk:
     nltk.download()
+
+from nltk.tokenize import RegexpTokenizer
 
 # parse the files in the training set and build a vocabulary with all the words it contains in Title for 2018. 
 # Then for each word, compute their frequencies and the probabilities of each
@@ -68,7 +70,7 @@ class Dataset:
 
     def display_vocabulary(self):
         for word in self.vocabulary:
-            print(word, end=', ')
+            print(word)
 
     def display_classifiers(self):
         for classifier in self.classifiers:
@@ -106,7 +108,7 @@ class NaiveBayesianClassifier:
         data_categories_indices = {
             'title': -1,
             'year': -1,
-            'post_type': - 1
+            'class': - 1
         }
 
         with open(self.csv_file_name) as csv_file:
@@ -123,18 +125,21 @@ class NaiveBayesianClassifier:
                         if category == 'title':
                             data_categories_indices['title'] = i
                         elif category == 'posttype':
-                            data_categories_indices['posttype'] = i
+                            data_categories_indices['class'] = i
                         elif category == 'year':
                             data_categories_indices['year'] = i
 
                     current_row += 1
                 else:
                     year = row[data_categories_indices['year']]
-                    classifier = row[data_categories_indices['post_type']]
+                    classifier = row[data_categories_indices['class']]
                     title_string = row[data_categories_indices['title']].lower()
 
-                    words = nltk.word_tokenize(title_string)
+                    # get all the words in the current line
+                    tokenizer = RegexpTokenizer(r'\w+')
+                    words = tokenizer.tokenize(title_string)
 
+                    # determine the frequency of each word for each classifier
                     if year == DATASET_MODEL_YEAR:
                         self.generate_frequency_maps(self.dataset_model, classifier, words)
 
@@ -149,6 +154,20 @@ class NaiveBayesianClassifier:
 def main():
     naive_bayesian_classifier = NaiveBayesianClassifier('./data/hns_2018_2019.csv')
     naive_bayesian_classifier.read_csv_data()
+
+    # print(len(naive_bayesian_classifier.dataset_model.vocabulary))
+    # naive_bayesian_classifier.dataset_model.display_classifiers()
+    # print()
+    # print(len(naive_bayesian_classifier.dataset_test.vocabulary))
+    # naive_bayesian_classifier.dataset_test.display_classifiers()
+
+    for category in naive_bayesian_classifier.dataset_model.classifiers:
+        print(category)
+        word_freq_map = naive_bayesian_classifier.dataset_model.classifiers[category]
+        for word in word_freq_map:
+            print(f'{word}: {word_freq_map[word]}')
+        print()
+
 
 if __name__ == '__main__':
     main()
