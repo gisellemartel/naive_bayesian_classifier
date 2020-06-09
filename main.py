@@ -6,6 +6,7 @@
 # --------------------------------------------------------
 
 import csv
+import numpy as np
 import ssl
 import nltk
 
@@ -65,6 +66,13 @@ from nltk.tokenize import RegexpTokenizer
 BAYESIAN_SMOOTHING_VALUE = 0.5
 DATASET_MODEL_YEAR = '2018'
 DATASET_TEST_YEAR = '2019'
+
+
+def print_data_to_file(data, filename):
+    file = open(f'./generated-data/{filename}', "w+")
+    for item in data:
+        file.write(f'{item}\n')
+    file.close()
 
 class Dataset:
 
@@ -166,6 +174,7 @@ class NaiveBayesianClassifier:
         with open(self.csv_file_name) as csv_file:
             csv_reader = csv.reader(csv_file, delimiter=',')
             current_row = 0
+            all_words = []
 
             for row in csv_reader:
                 # first row, parse the col categories
@@ -188,6 +197,11 @@ class NaiveBayesianClassifier:
                     title_string = row[data_categories_indices['title']].lower()
 
                     # get all the words in the current line
+                    for w in title_string.split():
+                        if w not in all_words:
+                            all_words.append(w)
+
+                    # generate the sanitized words from the current line
                     tokenizer = RegexpTokenizer(r'\w+')
                     words = tokenizer.tokenize(title_string)
 
@@ -206,12 +220,18 @@ class NaiveBayesianClassifier:
 
                     current_row += 1
 
+            # get the total num of documents
             self.dataset_model.total_documents = current_row
+
+            # write rejected words to file
+            rejected_words = np.setdiff1d(all_words, words)
+            print_data_to_file(rejected_words, 'remove_word.txt')
 
 
 def main():
     naive_bayesian_classifier = NaiveBayesianClassifier('./data/hns_2018_2019.csv')
     naive_bayesian_classifier.read_csv_data()
+    print_data_to_file(naive_bayesian_classifier.dataset_model.vocabulary, 'vocabulary.txt')
     naive_bayesian_classifier.train_dataset_model()
 
     naive_bayesian_classifier.dataset_model.display_conditional_probabilities()
