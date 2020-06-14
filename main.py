@@ -6,10 +6,7 @@
 # --------------------------------------------------------
 
 import csv
-import difflib
-
-import numpy as np
-import re
+import math
 import ssl
 import nltk
 
@@ -35,42 +32,24 @@ def debug_print_csv():
 
         for l in lines:
             print(l)
-
-BAYESIAN_SMOOTHING_VALUE = 0.5
-DATASET_MODEL_YEAR = '2018'
-DATASET_TEST_YEAR = '2019'
-
-
 def print_data_to_file(data, filename):
     file = open(f'./generated-data/{filename}', "w+")
     for item in data:
         file.write(f'{item}\n')
     file.close()
 
+BAYESIAN_SMOOTHING_VALUE = 0.5
+DATASET_MODEL_YEAR = '2018'
+DATASET_TEST_YEAR = '2019'
+
+
 class Dataset:
-
     def __init__(self):
-        self.vocabulary = []
         self.classifiers = {}
-
-    def display_vocabulary(self):
-        for word in self.vocabulary:
-            print(word)
 
     def display_classifiers(self):
         for classifier in self.classifiers:
             print(classifier, end=', ')
-
-    def display_word_frequencies(self):
-        for category in self.classifiers:
-            print(category)
-            word_freq_map = self.classifiers[category]
-            for word in word_freq_map:
-                print(f'{word}: {word_freq_map[word]}')
-            print()
-
-    def generate_frequency_maps_base(self):
-        return self.generate_frequency_maps_base()
 
 class ModelDataSet(Dataset):
     def __init__(self):
@@ -80,7 +59,8 @@ class ModelDataSet(Dataset):
         self.probabilities_classes = {}
         self.total_documents = 0
         self.num_docs_per_classifier = {}
-        self.parent_ref = [self.classifiers, self.vocabulary]
+        self.vocabulary = []
+        self.parent_ref = [self.classifiers]
 
     def calculate_conditional_probability(self, word, classifier):
         # P(word | classifier) = freq of word in classifier / total words in classifier
@@ -100,8 +80,12 @@ class ModelDataSet(Dataset):
     def train_dataset_model(self):
         for classifier in self.classifiers:
             for word in self.vocabulary:
-                self.conditional_probabilities[word] \
-                    = self.calculate_conditional_probability(word, classifier)
+                if word not in self.conditional_probabilities:
+                    self.conditional_probabilities[word] = {}
+                # determine the probability of having the curr word given the curr class
+                self.conditional_probabilities[word][classifier] = self.calculate_conditional_probability(word, classifier)
+
+            # determine the probability of the current class within the model
             self.probabilities_classes[classifier] = self.calculate_classifier_probability(classifier)
 
     def display_conditional_probabilities(self):
@@ -113,6 +97,18 @@ class ModelDataSet(Dataset):
         for p in self.probabilities_classes:
             print(p, end=': ')
             print(f'{round(self.probabilities_classes[p] * 100, 6)} %')
+
+    def display_vocabulary(self):
+        for word in self.vocabulary:
+            print(word)
+
+    def display_word_frequencies(self):
+        for category in self.classifiers:
+            print(category)
+            word_freq_map = self.classifiers[category]
+            for word in word_freq_map:
+                print(f'{word}: {word_freq_map[word]}')
+            print()
 
     def generate_frequency_maps(self, classifier, words):
         # add the classifier to the model if does not exist yet
@@ -158,12 +154,12 @@ class ModelDataSet(Dataset):
             for classifier in classifier_order:
                 if classifier in classifiers and word in classifiers[classifier]:
                     frequency = classifiers[classifier][word]
-                    cond_probability = round(self.conditional_probabilities[word], 8)
+                    cond_probability = round(self.conditional_probabilities[word][classifier], 8)
                     # add data for word and current class to line
                     line += (f'{delim}{frequency}{delim}{cond_probability}')
                 elif classifier in classifiers and word not in classifiers[classifier]:
                     frequency = 0
-                    cond_probability = round(self.conditional_probabilities[word], 8)
+                    cond_probability = round(self.conditional_probabilities[word][classifier], 8)
                     # add data for word and current class to line
                     line += (f'{delim}{frequency}{delim}{cond_probability}')
                 else:
@@ -191,29 +187,23 @@ class TestDataSet(Dataset):
 
     def __init__(self):
         super().__init__()
+        self.documents = []
 
-    def generate_frequency_maps(self, classifier, words):
+    def generate_test_documents(self, classifier, document):
         # add the classifier to the model if does not exist yet
         if classifier not in self.classifiers:
             self.classifiers[classifier] = {}
 
-        # if classifier not in self.total_word_count_foreach_class:
-        #     self.total_word_count_foreach_class[classifier] = 0
+        #  add the document to the test dataset
+        if document not in self.documents:
+            self.documents.append(document)
 
-        for word in words:
-            #  add the word to the vocabulary for the model
-            if word not in self.vocabulary:
-                self.vocabulary.append(word)
-
-            # generate the frequency of each word for each classifier
-            if word not in self.classifiers[classifier]:
-                self.classifiers[classifier][word] = 1
-            else:
-                current_freq = self.classifiers[classifier][word]
-                self.classifiers[classifier][word] = current_freq + 1
-            #
-            # total_word_count = self.total_word_count_foreach_class[classifier]
-            # self.total_word_count_foreach_class[classifier] = total_word_count + 1
+        # generate the frequency of each word for each classifier
+        if document not in self.classifiers[classifier]:
+            self.classifiers[classifier][document] = 1
+        else:
+            current_freq = self.classifiers[classifier][document]
+            self.classifiers[classifier][document] = current_freq + 1
 
 
 class NaiveBayesianClassifier:
@@ -234,6 +224,7 @@ class NaiveBayesianClassifier:
         with open(self.csv_file_name) as csv_file:
             csv_reader = csv.reader(csv_file, delimiter=',')
             current_row = 0
+            model_doc_ctr = 0
             all_rejected_words = []
 
             debug_print_titles = []
@@ -290,7 +281,7 @@ class NaiveBayesianClassifier:
 
                     all_rejected_words.append(rejected_words_line)
 
-                    # determine the frequency of each word for each classifier
+                    # determine the frequency of each word for each classifier for model
                     if year == DATASET_MODEL_YEAR:
                         if classifier not in self.dataset_model.num_docs_per_classifier:
                             self.dataset_model.num_docs_per_classifier[classifier] = 1
@@ -299,31 +290,61 @@ class NaiveBayesianClassifier:
                             self.dataset_model.num_docs_per_classifier[classifier] = current_num_docs + 1
 
                         self.dataset_model.generate_frequency_maps(classifier, sanitized_words)
-
+                        model_doc_ctr += 1
+                    # add the documents for the testing dataset (including their true classification)
+                    # classification to be approximated by naive bayesian classifier
                     elif year == DATASET_TEST_YEAR:
-                        self.dataset_test.generate_frequency_maps(classifier, sanitized_words)
+                        self.dataset_test.generate_test_documents(classifier, ' '.join(sanitized_words))
 
                     current_row += 1
 
             print_data_to_file(debug_print_titles, 'debug_titles.txt')
 
-            # get the total num of documents
-            self.dataset_model.total_documents = current_row
+            # set the total num of documents for the model (to be used later to calc probability of each class)
+            self.dataset_model.total_documents = model_doc_ctr
 
             # write rejected words to file
             print_data_to_file(all_rejected_words, 'remove_word.txt')
             # write the vocabulary to file
             print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
 
+    def classify_test_dataset(self):
+        for document in self.dataset_test.documents:
+            self.classify(document)
+
+    def classify(self, document):
+        max_score = -math.inf
+        global category_to_assign
+        for classifier in self.dataset_model.classifiers:
+            score = self.dataset_model.probabilities_classes[classifier]
+            for word in document.split():
+                if word in self.dataset_model.vocabulary \
+                    and word in self.dataset_model.conditional_probabilities \
+                    and classifier in self.dataset_model.conditional_probabilities[word]:
+                    # TODO: calc conditional probability of current word
+                    score = score + math.log10(self.dataset_model.conditional_probabilities[word][classifier])
+
+            if score > max_score:
+                max_score = score
+                category_to_assign = classifier
+
+        print(f'Likely category of \'{document}\': {category_to_assign}')
+
+
+
+
 
 def main():
-    debug_print_csv()
+    # debug_print_csv()
     # TODO: prompt user for name of dataset file, model year, and training year
     naive_bayesian_classifier = NaiveBayesianClassifier('./data/hns_2018_2019.csv')
     naive_bayesian_classifier.read_csv_data()
 
     naive_bayesian_classifier.dataset_model.train_dataset_model()
+    naive_bayesian_classifier.dataset_model.display_probabilities_classes()
     naive_bayesian_classifier.dataset_model.write_dataset_model_to_file()
+
+    naive_bayesian_classifier.classify_test_dataset()
 
     # debug
     # naive_bayesian_classifier.dataset_model.display_conditional_probabilities()
