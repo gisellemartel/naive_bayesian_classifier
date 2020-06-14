@@ -183,6 +183,14 @@ class ModelDataSet(Dataset):
 
         file.close()
 
+class Document:
+    def __init__(self, title, classifier):
+        self.title = title
+        self.true_class = classifier
+        self.generated_class = ''
+        self.class_scores = {}
+        self.is_prediction_correct = False
+
 class TestDataSet(Dataset):
 
     def __init__(self):
@@ -196,15 +204,52 @@ class TestDataSet(Dataset):
 
         #  add the document to the test dataset
         if document not in self.documents:
-            self.documents.append(document)
+            self.documents.append(Document(document, classifier))
 
         # generate the frequency of each word for each classifier
         if document not in self.classifiers[classifier]:
-            self.classifiers[classifier][document] = 1
+            self.classifiers[classifier] = [document]
         else:
-            current_freq = self.classifiers[classifier][document]
-            self.classifiers[classifier][document] = current_freq + 1
+            self.classifiers[classifier].append(document)
 
+    def write_test_results_to_file(self):
+        file = open(f'./generated-data/baseline-result.txt', "w+")
+
+        classifier_order = [
+            'story',
+            'ask_hn',
+            'show_hn',
+            'poll'
+        ]
+
+        delim = '  '
+        doc_lines_to_print = []
+        line_ctr = 1
+
+        for document in self.documents:
+            line = f'{line_ctr}{delim}{document.title}{delim}{document.generated_class}{delim}'
+            for classifier in classifier_order:
+                if classifier in document.class_scores:
+                    line += f'{document.class_scores[classifier]}{delim}'
+                else:
+                    line += f'0{delim}'
+
+            global label
+            if document.is_prediction_correct:
+                label = 'right'
+            else:
+                label = 'wrong'
+
+            line += f'{document.true_class}{delim}{label}\n'
+            line_ctr += 1
+            # store line to be written later to file
+            doc_lines_to_print.append(line)
+
+        # write data to file
+        for l in doc_lines_to_print:
+            file.write(l)
+
+        file.close()
 
 class NaiveBayesianClassifier:
 
@@ -314,25 +359,22 @@ class NaiveBayesianClassifier:
 
     def classify(self, document):
         max_score = -math.inf
-        global category_to_assign
         for classifier in self.dataset_model.classifiers:
             score = self.dataset_model.probabilities_classes[classifier]
-            for word in document.split():
+            for word in document.title.split():
                 if word in self.dataset_model.vocabulary \
                     and word in self.dataset_model.conditional_probabilities \
                     and classifier in self.dataset_model.conditional_probabilities[word]:
-                    # TODO: calc conditional probability of current word
+
                     score = score + math.log10(self.dataset_model.conditional_probabilities[word][classifier])
+                    document.class_scores[classifier] = score
 
             if score > max_score:
                 max_score = score
-                category_to_assign = classifier
+                document.generated_class = classifier
 
-        print(f'Likely category of \'{document}\': {category_to_assign}')
-
-
-
-
+            if document.generated_class == document.true_class:
+                document.is_prediction_correct = True
 
 def main():
     # debug_print_csv()
@@ -345,6 +387,7 @@ def main():
     naive_bayesian_classifier.dataset_model.write_dataset_model_to_file()
 
     naive_bayesian_classifier.classify_test_dataset()
+    naive_bayesian_classifier.dataset_test.write_test_results_to_file()
 
     # debug
     # naive_bayesian_classifier.dataset_model.display_conditional_probabilities()
