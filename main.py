@@ -6,7 +6,10 @@
 # --------------------------------------------------------
 
 import csv
+import difflib
+
 import numpy as np
+import re
 import ssl
 import nltk
 
@@ -20,48 +23,6 @@ if not nltk:
     nltk.download()
 
 from nltk.tokenize import RegexpTokenizer
-
-# parse the files in the training set and build a vocabulary with all the words it contains in Title for 2018. 
-# Then for each word, compute their frequencies and the probabilities of each
-# classes are: (story, ask_hn, show_hn and poll).
-# 
-# Extract the data from 2019 as the testing dataset.
-
-# To process the texts, fold the Title to lowercase, then tokenize and use the set of resulting word as your vocabulary.
-# For each word wi in the training set, save its frequency and its conditional probability for each Post Type class:
-#  P(wi|story), P(wi|ask_hn), P(wi|show_hn) and P(wi|poll).
-# 
-# These probabilities must be smoothed with 0.5.
-
-# Save your model in the text file named model-2018.txt. The format of this file must be the following:
-# 1. A line counter i, followed by 2 spaces.
-# 2. The word wi, followed by 2 spaces.
-
-# 3. The frequency of wi in the class story, followed by 2 spaces.
-# 4. The smoothed conditional probability of wi in story - P(wi|story), followed by 2 spaces.
-
-# 5. The frequency of wi in the class ask_hn, followed by 2 spaces.
-# 6. The smoothed conditional probability of wi in ask_hn - P(wi|ask_hn), followed by 2 spaces.
-
-# 7. The frequency of wi in the class show_hn, followed by 2 spaces.
-# 8. The smoothed conditional probability of wi in show_hn - P(wi|show_hn), followed by 2 spaces.
-
-# 9. The frequency of wi in the class poll, followed by 2 spaces.
-# 10. The smoothed conditional probability of wi in poll - P(wi|poll), followed by a carriage return.
-
-# Your file must be sorted alphabetically. 
-# For the four different Post Type class, ask_hn and show_hn should be considered as two words (ask_hn and show_hn) 
-# not 4 words in your vocabulary. For example, your files model-2018.txt could look like the following:
-# 1 block 3 0.003 40 0.4 10 0.014 4 0.04
-# 2 ask-hn 3 0.003 40 0.4 40 0.034 40 0.0024 
-# 3 query 40 0.4 50 0.03 20 0.00014 15 0.4
-# 4 show-hn 0.7 0.003 0 0.000001 30 0.4 2 0.4
-
-# Please note:
-# 1. The values presented above is an example not based on the real data.
-# 2. Your program should be able to output a file named "vocabulary.txt", which should contain all the words in your vocabulary.
-# f the title includes some words, which you think is not useful for classification, you can remove it from you vocabulary, 
-# but you need put all the removed words in an independent file named "remove_word.txt".
 
 BAYESIAN_SMOOTHING_VALUE = 0.5
 DATASET_MODEL_YEAR = '2018'
@@ -255,7 +216,9 @@ class NaiveBayesianClassifier:
         with open(self.csv_file_name) as csv_file:
             csv_reader = csv.reader(csv_file, delimiter=',')
             current_row = 0
-            all_words = []
+
+            debug_print_titles = []
+            all_rejected_words = []
 
             for row in csv_reader:
                 # first row, parse the col categories
@@ -277,15 +240,20 @@ class NaiveBayesianClassifier:
                     classifier = row[data_categories_indices['class']]
                     title_string = row[data_categories_indices['title']].lower()
 
-                    # get all the words in the current line
-                    for w in title_string.split():
-                        if w not in all_words:
-                            all_words.append(w)
+                    debug_print_titles.append(title_string)
 
                     # generate the sanitized words from the current line
-                    tokenizer = RegexpTokenizer(r'\w+')
-                    words = tokenizer.tokenize(title_string)
+                    regex = r'([a-zA-Z]+\'[a-zA-Z]+)|(\w+-\w+(-*\w*)+)|(?!(([a-zA-Z]+\'[a-zA-Z]+)|(\w+-\w+(-*\w*)+)))(\w+)'
+                    tokenizer = RegexpTokenizer(regex)
+                    words = tokenizer.tokenize(title_string.lower())
 
+                    sanitized_str = words.join(' ')
+
+                    rejected_words = [li for li in difflib.ndiff(title_string, sanitized_str) if li[0] != ' ']
+
+                    for w in rejected_words:
+                        if w not in all_rejected_words:
+                            all_rejected_words.append(w)
                     # determine the frequency of each word for each classifier
                     if year == DATASET_MODEL_YEAR:
                         if classifier not in self.dataset_model.num_docs_per_classifier:
@@ -301,12 +269,13 @@ class NaiveBayesianClassifier:
 
                     current_row += 1
 
+            print_data_to_file(debug_print_titles, 'debug_titles.txt')
+
             # get the total num of documents
             self.dataset_model.total_documents = current_row
 
             # write rejected words to file
-            rejected_words = np.setdiff1d(all_words, words)
-            print_data_to_file(rejected_words, 'remove_word.txt')
+            print_data_to_file(all_rejected_words, 'remove_word.txt')
 
             # write the vocabulary to file
             print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
