@@ -60,7 +60,6 @@ class Dataset:
     def generate_frequency_maps_base(self):
         return self.generate_frequency_maps_base()
 
-
 class ModelDataSet(Dataset):
     def __init__(self):
         super().__init__()
@@ -218,7 +217,7 @@ class NaiveBayesianClassifier:
             current_row = 0
 
             debug_print_titles = []
-            all_rejected_words = []
+            rejected_words = []
 
             for row in csv_reader:
                 # first row, parse the col categories
@@ -245,15 +244,17 @@ class NaiveBayesianClassifier:
                     # generate the sanitized words from the current line
                     regex = r'([a-zA-Z]+\'[a-zA-Z]+)|(\w+-\w+(-*\w*)+)|(?!(([a-zA-Z]+\'[a-zA-Z]+)|(\w+-\w+(-*\w*)+)))(\w+)'
                     tokenizer = RegexpTokenizer(regex)
-                    words = tokenizer.tokenize(title_string.lower())
+                    sanitized_words = tokenizer.tokenize(title_string)
 
-                    sanitized_str = words.join(' ')
+                    sanitized_words_chars = list(' '.join(w for w in sanitized_words))
+                    raw_words_chars = list(title_string)
 
-                    rejected_words = [li for li in difflib.ndiff(title_string, sanitized_str) if li[0] != ' ']
+                    rejected_chars = np.setdiff1d(raw_words_chars, sanitized_words_chars)
 
-                    for w in rejected_words:
-                        if w not in all_rejected_words:
-                            all_rejected_words.append(w)
+                    for c in rejected_chars:
+                        if c not in rejected_words:
+                            rejected_words.append(c)
+
                     # determine the frequency of each word for each classifier
                     if year == DATASET_MODEL_YEAR:
                         if classifier not in self.dataset_model.num_docs_per_classifier:
@@ -262,10 +263,10 @@ class NaiveBayesianClassifier:
                             current_num_docs = self.dataset_model.num_docs_per_classifier[classifier]
                             self.dataset_model.num_docs_per_classifier[classifier] = current_num_docs + 1
 
-                        self.dataset_model.generate_frequency_maps(classifier, words)
+                        self.dataset_model.generate_frequency_maps(classifier, sanitized_words)
 
                     elif year == DATASET_TEST_YEAR:
-                        self.dataset_test.generate_frequency_maps(classifier, words)
+                        self.dataset_test.generate_frequency_maps(classifier, sanitized_words)
 
                     current_row += 1
 
@@ -275,8 +276,7 @@ class NaiveBayesianClassifier:
             self.dataset_model.total_documents = current_row
 
             # write rejected words to file
-            print_data_to_file(all_rejected_words, 'remove_word.txt')
-
+            print_data_to_file(rejected_words, 'remove_word.txt')
             # write the vocabulary to file
             print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
 
