@@ -24,6 +24,18 @@ if not nltk:
 
 from nltk.tokenize import RegexpTokenizer
 
+def debug_print_csv():
+    with open("./data/hns_2018_2019.csv",'r') as f:
+        rowReader = csv.reader(f, delimiter=',')
+        lines = []
+        for values in rowReader:
+            if values[9] == '2018':
+                lines.append(f'{values[3]}\t\t{values[2]}')
+        lines.sort()
+
+        for l in lines:
+            print(l)
+
 BAYESIAN_SMOOTHING_VALUE = 0.5
 DATASET_MODEL_YEAR = '2018'
 DATASET_TEST_YEAR = '2019'
@@ -125,6 +137,8 @@ class ModelDataSet(Dataset):
             total_word_count = self.total_word_count_foreach_class[classifier]
             self.total_word_count_foreach_class[classifier] = total_word_count + 1
 
+        self.vocabulary.sort()
+
     def write_dataset_model_to_file(self):
         file = open(f'./generated-data/model-{DATASET_MODEL_YEAR}.txt', "w+")
 
@@ -144,12 +158,19 @@ class ModelDataSet(Dataset):
             for classifier in classifier_order:
                 if classifier in classifiers and word in classifiers[classifier]:
                     frequency = classifiers[classifier][word]
-                    cond_probability = round(self.conditional_probabilities[word], 6)
+                    cond_probability = round(self.conditional_probabilities[word], 8)
+                    # add data for word and current class to line
+                    line += (f'{delim}{frequency}{delim}{cond_probability}')
+                elif classifier in classifiers and word not in classifiers[classifier]:
+                    frequency = 0
+                    cond_probability = round(self.conditional_probabilities[word], 8)
                     # add data for word and current class to line
                     line += (f'{delim}{frequency}{delim}{cond_probability}')
                 else:
-                    line += f'{delim}x{delim}x'
-
+                    frequency = 0
+                    cond_probability = 0.0
+                    # add data for word and current class to line
+                    line += (f'{delim}{frequency}{delim}{cond_probability}')
             # store line to be written later to file
             doc_lines_to_print.append(line)
 
@@ -162,9 +183,7 @@ class ModelDataSet(Dataset):
 
         # write data to file
         for l in doc_lines_to_print:
-            print(l)
             file.write(l)
-
 
         file.close()
 
@@ -215,9 +234,9 @@ class NaiveBayesianClassifier:
         with open(self.csv_file_name) as csv_file:
             csv_reader = csv.reader(csv_file, delimiter=',')
             current_row = 0
+            all_rejected_words = []
 
             debug_print_titles = []
-            rejected_words = []
 
             for row in csv_reader:
                 # first row, parse the col categories
@@ -238,22 +257,38 @@ class NaiveBayesianClassifier:
                     year = row[data_categories_indices['year']]
                     classifier = row[data_categories_indices['class']]
                     title_string = row[data_categories_indices['title']].lower()
+                    raw_words_chars = list(title_string)
 
                     debug_print_titles.append(title_string)
 
                     # generate the sanitized words from the current line
-                    regex = r'([a-zA-Z]+\'[a-zA-Z]+)|(\w+-\w+(-*\w*)+)|(?!(([a-zA-Z]+\'[a-zA-Z]+)|(\w+-\w+(-*\w*)+)))(\w+)'
+                    regex = r'(\w+\,\w+)|(\w+\'\w+)|(\w+\’\w+)|(\w+-\w+(-*\w*)+)|(?!((\w+\,\w+)|(\w+\'\w+)|(\w+\’\w+)|(\w+-\w+(-*\w*)+)))(\w+)'
                     tokenizer = RegexpTokenizer(regex)
-                    sanitized_words = tokenizer.tokenize(title_string)
+                    sanitized_words_tuples = tokenizer.tokenize(title_string)
+                    sanitized_words = []
+                    rejected_words = []
+
+                    for entry in sanitized_words_tuples:
+                        matches = [e for e in entry if len(e) > 0]
+                        if len(matches) > 1:
+                            print('Something went wrong with the tokenization')
+                        for match in matches:
+                            if len(match) > 0:
+                                sanitized_words.append(match)
 
                     sanitized_words_chars = list(' '.join(w for w in sanitized_words))
-                    raw_words_chars = list(title_string)
 
-                    rejected_chars = np.setdiff1d(raw_words_chars, sanitized_words_chars)
+                    rejected_chars = list((nltk.Counter(raw_words_chars) - nltk.Counter(sanitized_words_chars)).elements())
 
                     for c in rejected_chars:
-                        if c not in rejected_words:
-                            rejected_words.append(c)
+                        rejected_words.append(c)
+
+                    if len(rejected_words) > 0:
+                        rejected_words_line = '\t'.join(w for w in rejected_words)
+                    else:
+                        rejected_words_line=""
+
+                    all_rejected_words.append(rejected_words_line)
 
                     # determine the frequency of each word for each classifier
                     if year == DATASET_MODEL_YEAR:
@@ -276,12 +311,14 @@ class NaiveBayesianClassifier:
             self.dataset_model.total_documents = current_row
 
             # write rejected words to file
-            print_data_to_file(rejected_words, 'remove_word.txt')
+            print_data_to_file(all_rejected_words, 'remove_word.txt')
             # write the vocabulary to file
             print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
 
 
 def main():
+    debug_print_csv()
+    # TODO: prompt user for name of dataset file, model year, and training year
     naive_bayesian_classifier = NaiveBayesianClassifier('./data/hns_2018_2019.csv')
     naive_bayesian_classifier.read_csv_data()
 
