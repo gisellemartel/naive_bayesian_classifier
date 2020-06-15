@@ -336,7 +336,8 @@ class NaiveBayesianClassifier:
 
             success_rate = ( 1 - num_incorrect_classifications/len(self.dataset_test.documents)) * 100
 
-            print(f'{label} experiment yielded a classification success rate of: {success_rate}%\n')
+            print(f'* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * \n\n'
+                  f'{label} experiment yielded a classification success rate of: {success_rate}%\n')
             print(f'Model Statistics:\n'
                   f'Vocabulary Size: {len(self.dataset_model.vocabulary)}\n'
                   f'# of documents in test dataset: {len(self.dataset_test.documents)}\n'
@@ -471,8 +472,6 @@ class NaiveBayesianClassifier:
             # write the vocabulary to file
             print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
 
-            print(len(debug_stop_words))
-
     def classify_test_dataset(self):
         for document in self.dataset_test.documents:
             self.classify(document)
@@ -507,15 +506,13 @@ def main():
     file_name = './data/hns_2018_2019.csv'
     model_year = '2018'
     test_year = '2019'
-    experiment_type = 1
+    experiment_type = 2
 
     classifier = NaiveBayesianClassifier(file_name, model_year, test_year, experiment_type)
 
     classifier.read_csv_data()
 
     classifier.dataset_model.train_dataset_model()
-
-    print(len(classifier.dataset_model.vocabulary))
 
     classifier.dataset_model.write_dataset_model_to_file(classifier.experiment_type)
 
