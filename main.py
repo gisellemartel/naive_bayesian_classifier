@@ -7,8 +7,10 @@
 
 import csv
 import math
+import os
 import ssl
 import nltk
+from enum import Enum
 
 try:
     _create_unverified_https_context = ssl._create_unverified_context
@@ -20,6 +22,8 @@ if not nltk:
     nltk.download()
 
 from nltk.tokenize import RegexpTokenizer
+
+BAYESIAN_SMOOTHING_VALUE = 0.5
 
 def debug_print_csv():
     with open("./data/hns_2018_2019.csv",'r') as f:
@@ -38,10 +42,40 @@ def print_data_to_file(data, filename):
         file.write(f'{item}\n')
     file.close()
 
-BAYESIAN_SMOOTHING_VALUE = 0.5
-DATASET_MODEL_YEAR = '2018'
-DATASET_TEST_YEAR = '2019'
+def prompt_user_dataset_file_name():
+    filename = './data/'
+    while not os.path.isfile(filename):
+        filename = input("Enter the name of the dataset file (must be located in ./data): ")
+        filename = f'./data/{filename}'
+        if not os.path.isfile(filename):
+            print('Did not enter a valid file name! Try again')
+    return filename
 
+def prompt_user_year(type):
+    year = input(f'Enter the year of the {type} data: ')
+    return year
+
+def prompt_user_experiment_type():
+    experiment_type = None
+    while type(experiment_type) != int or experiment_type < 1 or experiment_type > 4:
+
+        display_str = 'Enter the number corresponding to the type of experiment you would like to conduct\n' \
+                      '1 - Baseline\n' \
+                      '2 - Stop-word filtering\n' \
+                      '3 - Word-length filtering\n' \
+                      '4 - Infrequent word filtering\n'
+        experiment_type = int(input(display_str))
+
+        if type(experiment_type) != int or experiment_type < 1 or experiment_type > 4:
+            print('invalid selection! Try again.')
+
+    return experiment_type
+
+class ExperimentType(Enum):
+    BASELINE = 1
+    STOP_WORD = 2
+    WORD_LEN = 3
+    INFREQ_WORD = 4
 
 class Dataset:
     def __init__(self):
@@ -52,7 +86,7 @@ class Dataset:
             print(classifier, end=', ')
 
 class ModelDataSet(Dataset):
-    def __init__(self):
+    def __init__(self, year):
         super().__init__()
         self.total_word_count_foreach_class = {}
         self.conditional_probabilities = {}
@@ -61,6 +95,7 @@ class ModelDataSet(Dataset):
         self.num_docs_per_classifier = {}
         self.vocabulary = []
         self.parent_ref = [self.classifiers]
+        self.year = year
 
     def calculate_conditional_probability(self, word, classifier):
         # P(word | classifier) = freq of word in classifier / total words in classifier
@@ -136,7 +171,7 @@ class ModelDataSet(Dataset):
         self.vocabulary.sort()
 
     def write_dataset_model_to_file(self):
-        file = open(f'./generated-data/model-{DATASET_MODEL_YEAR}.txt', "w+")
+        file = open(f'./generated-data/model-{self.year}.txt', "w+")
 
         classifier_order = [
             'story',
@@ -193,9 +228,10 @@ class Document:
 
 class TestDataSet(Dataset):
 
-    def __init__(self):
+    def __init__(self, year):
         super().__init__()
         self.documents = []
+        self.year = year
 
     def generate_test_documents(self, classifier, document):
         # add the classifier to the model if does not exist yet
@@ -253,10 +289,20 @@ class TestDataSet(Dataset):
 
 class NaiveBayesianClassifier:
 
-    def __init__(self, csv_file_name):
+    def __init__(self, csv_file_name,  model_year, test_year, experiment_type):
         self.csv_file_name = csv_file_name
-        self.dataset_model = ModelDataSet()
-        self.dataset_test = TestDataSet()
+        self.dataset_model = ModelDataSet(model_year)
+        self.dataset_test = TestDataSet(test_year)
+        self.experiment_type = ExperimentType(experiment_type)
+        self.stop_words = []
+        if self.experiment_type == ExperimentType.STOP_WORD:
+            self.parse_stop_words_from_file()
+
+    def parse_stop_words_from_file(self):
+        with open('./data/stopwords.txt') as file:
+            lines = file.read().splitlines()
+        for word in lines:
+            self.stop_words.append(word)
 
     def read_csv_data(self):
         # map to store which columns the desired data categories are contained
@@ -273,6 +319,7 @@ class NaiveBayesianClassifier:
             all_rejected_words = []
 
             debug_print_titles = []
+            debug_stop_words = []
 
             for row in csv_reader:
                 # first row, parse the col categories
@@ -312,6 +359,13 @@ class NaiveBayesianClassifier:
                             if len(match) > 0:
                                 sanitized_words.append(match)
 
+                    if self.experiment_type == ExperimentType.STOP_WORD and len(self.stop_words) > 0:
+                        for word in sanitized_words:
+                            if word in self.stop_words:
+                                sanitized_words.remove(word)
+                                rejected_words.append(word)
+                                debug_stop_words.append(word)
+
                     sanitized_words_chars = list(' '.join(w for w in sanitized_words))
 
                     rejected_chars = list((nltk.Counter(raw_words_chars) - nltk.Counter(sanitized_words_chars)).elements())
@@ -327,7 +381,7 @@ class NaiveBayesianClassifier:
                     all_rejected_words.append(rejected_words_line)
 
                     # determine the frequency of each word for each classifier for model
-                    if year == DATASET_MODEL_YEAR:
+                    if year == self.dataset_model.year:
                         if classifier not in self.dataset_model.num_docs_per_classifier:
                             self.dataset_model.num_docs_per_classifier[classifier] = 1
                         else:
@@ -338,7 +392,7 @@ class NaiveBayesianClassifier:
                         model_doc_ctr += 1
                     # add the documents for the testing dataset (including their true classification)
                     # classification to be approximated by naive bayesian classifier
-                    elif year == DATASET_TEST_YEAR:
+                    elif year == self.dataset_test.year:
                         self.dataset_test.generate_test_documents(classifier, ' '.join(sanitized_words))
 
                     current_row += 1
@@ -352,6 +406,9 @@ class NaiveBayesianClassifier:
             print_data_to_file(all_rejected_words, 'remove_word.txt')
             # write the vocabulary to file
             print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
+
+            for w in debug_stop_words:
+                print(w)
 
     def classify_test_dataset(self):
         for document in self.dataset_test.documents:
@@ -379,15 +436,29 @@ class NaiveBayesianClassifier:
 def main():
     # debug_print_csv()
     # TODO: prompt user for name of dataset file, model year, and training year
-    naive_bayesian_classifier = NaiveBayesianClassifier('./data/hns_2018_2019.csv')
+    # file_name = prompt_user_dataset_file_name()
+    # model_year = prompt_user_year('model')
+    # test_year = prompt_user_year('test')
+    # experiment_type = prompt_user_experiment_type()
+
+    file_name = './data/hns_2018_2019.csv'
+    model_year = '2018'
+    test_year = '2019'
+    experiment_type = 1
+
+    naive_bayesian_classifier = NaiveBayesianClassifier(file_name, model_year, test_year, experiment_type)
+
     naive_bayesian_classifier.read_csv_data()
 
     naive_bayesian_classifier.dataset_model.train_dataset_model()
     naive_bayesian_classifier.dataset_model.display_probabilities_classes()
-    naive_bayesian_classifier.dataset_model.write_dataset_model_to_file()
 
-    naive_bayesian_classifier.classify_test_dataset()
-    naive_bayesian_classifier.dataset_test.write_test_results_to_file()
+    print(len(naive_bayesian_classifier.dataset_model.vocabulary))
+
+    # naive_bayesian_classifier.dataset_model.write_dataset_model_to_file()
+    #
+    # naive_bayesian_classifier.classify_test_dataset()
+    # naive_bayesian_classifier.dataset_test.write_test_results_to_file()
 
     # debug
     # naive_bayesian_classifier.dataset_model.display_conditional_probabilities()
