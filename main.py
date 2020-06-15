@@ -269,21 +269,6 @@ class TestDataSet(Dataset):
         self.documents = []
         self.year = year
 
-    def generate_test_documents(self, classifier, document):
-        # add the classifier to the model if does not exist yet
-        if classifier not in self.classifiers:
-            self.classifiers[classifier] = {}
-
-        #  add the document to the test dataset
-        if document not in self.documents:
-            self.documents.append(TestDocument(document, classifier))
-
-        # generate the frequency of each word for each classifier
-        if document not in self.classifiers[classifier]:
-            self.classifiers[classifier] = [document]
-        else:
-            self.classifiers[classifier].append(document)
-
     def write_test_results_to_file(self, experiment_type):
         if experiment_type != ExperimentType.INFREQ_WORD:
             filename = get_experiment_filename(experiment_type)
@@ -487,26 +472,30 @@ class NaiveBayesianClassifier:
         print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
 
     def generate_testing_data(self):
-        for i, doc in enumerate(self.sanitized_test_documents):
-            words_in_doc = doc.title.split()
+        self.dataset_test.documents = []
+        if self.dataset_test.experiment_type == ExperimentType.BASELINE:
+            self.dataset_test.documents = self.sanitized_test_documents
+        else:
+            for i, doc in enumerate(self.sanitized_test_documents):
+                words_in_doc = doc.title.split()
 
-            if self.dataset_test.experiment_type == ExperimentType.STOP_WORD:
-                for word in words_in_doc:
-                    if word in self.stop_words:
-                        words_in_doc.remove(word)
+                if self.dataset_test.experiment_type == ExperimentType.STOP_WORD:
+                    for word in words_in_doc:
+                        if word in self.stop_words:
+                            words_in_doc.remove(word)
 
-            elif self.dataset_test.experiment_type == ExperimentType.WORD_LEN:
-                for word in words_in_doc:
-                    if len(word) <= 2 or len(word) >= 9:
-                        words_in_doc.remove(word)
+                elif self.dataset_test.experiment_type == ExperimentType.WORD_LEN:
+                    for word in words_in_doc:
+                        if len(word) <= 2 or len(word) >= 9:
+                            words_in_doc.remove(word)
 
-            elif self.dataset_test.experiment_type  == ExperimentType.INFREQ_WORD:
-                # TODO: infreq experiement
-                pass
+                elif self.dataset_test.experiment_type  == ExperimentType.INFREQ_WORD:
+                    # TODO: infreq experiement
+                    pass
 
-            # add the documents for the testing dataset (including their true classification)
-            # classification to be approximated by naive bayesian classifier
-            self.dataset_test.generate_test_documents(doc.true_class, doc.title)
+                # add the documents for the testing dataset (including their true classification)
+                # classification to be approximated by naive bayesian classifier
+                self.dataset_test.documents.append(doc)
 
     def classify_test_dataset(self):
         for document in self.dataset_test.documents:
@@ -528,6 +517,17 @@ class NaiveBayesianClassifier:
         if document.generated_class == document.true_class:
             document.is_prediction_correct = True
 
+    def do_experiment(self, experiment_type):
+        self.generate_vocabulary(experiment_type)
+        self.generate_testing_data()
+        self.dataset_model.train_dataset_model()
+        self.dataset_model.write_dataset_model_to_file(experiment_type)
+        # run the Naive Bayes Classifier
+        self.classify_test_dataset()
+        self.dataset_test.write_test_results_to_file(experiment_type)
+        self.display_test_result()
+
+
 def main():
     # debug_print_csv()
 
@@ -543,18 +543,12 @@ def main():
     data = csv_to_array(file_name)
 
     classifier = NaiveBayesianClassifier(data, model_year, test_year)
-
     classifier.parse_data_baseline()
-    classifier.generate_vocabulary(ExperimentType.INFREQ_WORD)
-    classifier.generate_testing_data()
 
-    classifier.dataset_model.train_dataset_model()
-    classifier.dataset_model.write_dataset_model_to_file(ExperimentType.INFREQ_WORD)
-
-    # run the Naive Bayes Classifier
-    classifier.classify_test_dataset()
-    classifier.dataset_test.write_test_results_to_file(ExperimentType.INFREQ_WORD)
-    classifier.display_test_result()
+    classifier.do_experiment(ExperimentType.BASELINE)
+    classifier.do_experiment(ExperimentType.STOP_WORD)
+    classifier.do_experiment(ExperimentType.WORD_LEN)
+    classifier.do_experiment(ExperimentType.INFREQ_WORD)
 
 
 if __name__ == '__main__':
