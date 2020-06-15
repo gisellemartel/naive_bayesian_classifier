@@ -141,6 +141,8 @@ class ModelDataSet(Dataset):
         return self.num_docs_per_classifier[classifier] / self.total_documents
 
     def train_dataset_model(self):
+        self.conditional_probabilities = {}
+        self.probabilities_classes = {}
         for classifier in self.classifiers:
             for word in self.vocabulary:
                 if word not in self.conditional_probabilities:
@@ -310,6 +312,10 @@ class TestDataSet(Dataset):
 
             file.close()
 
+class GraphData():
+    def __init__(self):
+        self.vocabulary_sizes = []
+        self.classifier_scores = []
 
 class NaiveBayesianClassifier:
 
@@ -320,6 +326,8 @@ class NaiveBayesianClassifier:
         self.dataset_model = ModelDataSet(model_year)
         self.dataset_test = TestDataSet(test_year)
         self.stop_words = []
+        self.word_filtering_graph_data_1 = GraphData()
+        self.word_filtering_graph_data_2 = GraphData()
 
     def display_test_result(self):
             num_incorrect_classifications = 0
@@ -425,51 +433,51 @@ class NaiveBayesianClassifier:
         self.dataset_model.total_documents = model_doc_ctr
 
     def generate_vocabulary(self, experiment_type):
-        # reset the vocabulary
-        self.dataset_model.vocabulary = []
         self.dataset_model.experiment_type = experiment_type
         self.dataset_test.experiment_type = experiment_type
+        if experiment_type != ExperimentType.INFREQ_WORD:
+            # reset the vocabulary
+            self.dataset_model.vocabulary = []
+            if experiment_type == ExperimentType.STOP_WORD:
+                self.parse_stop_words_from_file()
 
-        if experiment_type == ExperimentType.STOP_WORD:
-            self.parse_stop_words_from_file()
+            for i, doc in enumerate(self.sanitized_model_documents):
+                words_in_doc = doc.sanitized_title.split()
 
-        for i, doc in enumerate(self.sanitized_model_documents):
-            words_in_doc = doc.sanitized_title.split()
+                if experiment_type == ExperimentType.BASELINE:
+                    self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
 
-            if experiment_type == ExperimentType.BASELINE:
-                self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
+                elif experiment_type == ExperimentType.STOP_WORD:
+                    for word in words_in_doc:
+                        if word in self.stop_words:
+                            words_in_doc.remove(word)
+                            doc.rejected_words.append(word)
 
-            elif experiment_type == ExperimentType.STOP_WORD:
-                for word in words_in_doc:
-                    if word in self.stop_words:
-                        words_in_doc.remove(word)
-                        doc.rejected_words.append(word)
+                    self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
 
-                self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
+                elif experiment_type == ExperimentType.WORD_LEN:
+                    for word in words_in_doc:
+                        if len(word) <= 2 or len(word) >= 9:
+                            words_in_doc.remove(word)
+                            doc.rejected_words.append(word)
 
-            elif experiment_type == ExperimentType.WORD_LEN:
-                for word in words_in_doc:
-                    if len(word) <= 2 or len(word) >= 9:
-                        words_in_doc.remove(word)
-                        doc.rejected_words.append(word)
+                    self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
 
-                self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
+                if len(doc.rejected_words) > 0:
+                    rejected_words_line = '\t'.join(w for w in doc.rejected_words)
+                else:
+                    rejected_words_line = ""
 
-            elif experiment_type == ExperimentType.INFREQ_WORD:
-                # TODO: infreq experiement
-                pass
-
-            if len(doc.rejected_words) > 0:
-                rejected_words_line = '\t'.join(w for w in doc.rejected_words)
-            else:
-                rejected_words_line = ""
-
-            self.dataset_model.rejected_words.append(rejected_words_line)
-
-        # write rejected words to file
-        print_data_to_file(self.dataset_model.rejected_words, 'remove_word.txt')
-        # write the vocabulary to file
-        print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
+                self.dataset_model.rejected_words.append(rejected_words_line)
+            # write rejected words to file
+            print_data_to_file(self.dataset_model.rejected_words, 'remove_word.txt')
+            # write the vocabulary to file
+            print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
+        else:
+            # GRAPH 1
+            self.generate_least_frequent_word_filtering()
+            # Graph 2
+            self.generate_most_frequent_word_filtering()
 
     def generate_testing_data(self):
         self.dataset_test.documents = []
@@ -497,6 +505,53 @@ class NaiveBayesianClassifier:
                 # classification to be approximated by naive bayesian classifier
                 self.dataset_test.documents.append(doc)
 
+    def generate_least_frequent_word_filtering(self):
+        frequency_thresholds = [
+            1, 5, 10, 15, 20
+        ]
+
+        for freq in frequency_thresholds:
+            # reset the vocabulary
+            self.dataset_model.vocabulary = []
+            for i, doc in enumerate(self.sanitized_model_documents):
+                words_in_doc = doc.sanitized_title.split()
+                self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
+
+                if len(doc.rejected_words) > 0:
+                    rejected_words_line = '\t'.join(w for w in doc.rejected_words)
+                else:
+                    rejected_words_line = ""
+                self.dataset_model.rejected_words.append(rejected_words_line)
+
+                for classifier in self.dataset_model.classifiers:
+                    for word in self.dataset_model.classifiers[classifier]:
+                        frequency = self.dataset_model.classifiers[classifier][word]
+                        if frequency <= freq and frequency > 0 and word in self.dataset_model.vocabulary:
+                            self.dataset_model.vocabulary.remove(word)
+                            self.dataset_model.classifiers[classifier][word] = 0
+                            self.dataset_model.total_word_count_foreach_class[classifier] -= 1
+
+            # TODO: parse the vocab size as x values, and the score as y-values
+            self.word_filtering_graph_data_1.vocabulary_sizes.append(len(self.dataset_model.vocabulary))
+
+            self.dataset_model.train_dataset_model()
+            # run the Naive Bayes Classifier
+            self.classify_test_dataset()
+
+    def generate_most_frequent_word_filtering(self):
+        frequency_thresholds = [
+            0.05, 0.10, 0.15, 0.20, 0.25
+        ]
+
+        for freq in frequency_thresholds:
+            # reset the vocabulary
+            self.dataset_model.vocabulary = []
+            for i, doc in enumerate(self.sanitized_model_documents):
+                pass
+
+            # TODO: parse the vocab size as x values, and the score as y-values
+            self.word_filtering_graph_data_2.vocabulary_sizes.append(len(self.dataset_model.vocabulary))
+
     def classify_test_dataset(self):
         for document in self.dataset_test.documents:
             self.classify(document)
@@ -520,11 +575,14 @@ class NaiveBayesianClassifier:
     def do_experiment(self, experiment_type):
         self.generate_vocabulary(experiment_type)
         self.generate_testing_data()
-        self.dataset_model.train_dataset_model()
-        self.dataset_model.write_dataset_model_to_file(experiment_type)
-        # run the Naive Bayes Classifier
-        self.classify_test_dataset()
-        self.dataset_test.write_test_results_to_file(experiment_type)
+
+        if experiment_type != ExperimentType.INFREQ_WORD:
+            self.dataset_model.train_dataset_model()
+            self.dataset_model.write_dataset_model_to_file(experiment_type)
+            # run the Naive Bayes Classifier
+            self.classify_test_dataset()
+            self.dataset_test.write_test_results_to_file(experiment_type)
+
         self.display_test_result()
 
 
@@ -545,9 +603,9 @@ def main():
     classifier = NaiveBayesianClassifier(data, model_year, test_year)
     classifier.parse_data_baseline()
 
-    classifier.do_experiment(ExperimentType.BASELINE)
-    classifier.do_experiment(ExperimentType.STOP_WORD)
-    classifier.do_experiment(ExperimentType.WORD_LEN)
+    # classifier.do_experiment(ExperimentType.BASELINE)
+    # classifier.do_experiment(ExperimentType.STOP_WORD)
+    # classifier.do_experiment(ExperimentType.WORD_LEN)
     classifier.do_experiment(ExperimentType.INFREQ_WORD)
 
 
