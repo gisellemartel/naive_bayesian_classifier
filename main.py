@@ -339,10 +339,10 @@ class NaiveBayesianClassifier:
             print(f'* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * \n\n'
                   f'{label} experiment yielded a classification success rate of: {success_rate}%\n')
             print(f'Model Statistics:\n'
-                  f'Vocabulary Size: {len(self.dataset_model.vocabulary)}\n'
-                  f'# of documents in test dataset: {len(self.dataset_test.documents)}\n'
-                  f'# of correctly classified documents: {len(self.dataset_test.documents) - num_incorrect_classifications}\n'
-                  f'# of incorrectly classified documents: {num_incorrect_classifications}')
+                  f'# words in model vocabulary: {len(self.dataset_model.vocabulary)}\n'
+                  f'# documents in test dataset: {len(self.dataset_test.documents)}\n'
+                  f'# correctly classified documents: {len(self.dataset_test.documents) - num_incorrect_classifications}\n'
+                  f'# incorrectly classified documents: {num_incorrect_classifications}')
 
     def parse_stop_words_from_file(self):
         with open('./data/stopwords.txt') as file:
@@ -506,7 +506,7 @@ def main():
     file_name = './data/hns_2018_2019.csv'
     model_year = '2018'
     test_year = '2019'
-    experiment_type = 2
+    experiment_type = 4
 
     classifier = NaiveBayesianClassifier(file_name, model_year, test_year, experiment_type)
 
@@ -516,6 +516,7 @@ def main():
 
     classifier.dataset_model.write_dataset_model_to_file(classifier.experiment_type)
 
+    # run the Naive Bayes Classifier
     classifier.classify_test_dataset()
 
     classifier.dataset_test.write_test_results_to_file(classifier.experiment_type)
