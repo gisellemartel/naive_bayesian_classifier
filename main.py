@@ -305,6 +305,7 @@ class TestDataSet(Dataset):
 
             file.close()
 
+
 class NaiveBayesianClassifier:
 
     def __init__(self, csv_file_name,  model_year, test_year, experiment_type):
@@ -313,8 +314,34 @@ class NaiveBayesianClassifier:
         self.dataset_test = TestDataSet(test_year)
         self.experiment_type = ExperimentType(experiment_type)
         self.stop_words = []
+
         if self.experiment_type == ExperimentType.STOP_WORD:
             self.parse_stop_words_from_file()
+
+    def display_test_result(self):
+            num_incorrect_classifications = 0
+
+            for document in self.dataset_test.documents:
+                if not document.is_prediction_correct:
+                    num_incorrect_classifications += 1
+
+            if self.experiment_type == ExperimentType.BASELINE:
+                label = 'Baseline'
+            if self.experiment_type == ExperimentType.STOP_WORD:
+                label = 'Stop-word'
+            if self.experiment_type == ExperimentType.WORD_LEN:
+                label = 'Word-length'
+            if self.experiment_type == ExperimentType.INFREQ_WORD:
+                label = 'Infrequent word filtering'
+
+            success_rate = ( 1 - num_incorrect_classifications/len(self.dataset_test.documents)) * 100
+
+            print(f'{label} experiment yielded a classification success rate of: {success_rate}%\n')
+            print(f'Model Statistics:\n'
+                  f'Vocabulary Size: {len(self.dataset_model.vocabulary)}\n'
+                  f'# of documents in test dataset: {len(self.dataset_test.documents)}\n'
+                  f'# of correctly classified documents: {len(self.dataset_test.documents) - num_incorrect_classifications}\n'
+                  f'# of incorrectly classified documents: {num_incorrect_classifications}')
 
     def parse_stop_words_from_file(self):
         with open('./data/stopwords.txt') as file:
@@ -338,6 +365,7 @@ class NaiveBayesianClassifier:
 
             debug_print_titles = []
             debug_stop_words = []
+            debug_word_len = []
 
             for row in csv_reader:
                 # first row, parse the col categories
@@ -369,29 +397,42 @@ class NaiveBayesianClassifier:
                     sanitized_words = []
                     rejected_words = []
 
+                    check_stop_word = self.experiment_type == ExperimentType.STOP_WORD
+                    check_word_len = self.experiment_type == ExperimentType.WORD_LEN
+                    use_infreq_word_filtering = self.experiment_type == ExperimentType.INFREQ_WORD
+
                     for entry in sanitized_words_tuples:
                         matches = [e for e in entry if len(e) > 0]
                         if len(matches) > 1:
                             print('Something went wrong with the tokenization')
                         for match in matches:
-                            check_stop_word = (self.experiment_type == ExperimentType.STOP_WORD and match not in self.stop_words)
                             if len(match) > 0:
-                                if check_stop_word or self.experiment_type != ExperimentType.STOP_WORD:
-                                    sanitized_words.append(match)
-                                else:
+                                if check_stop_word and match in self.stop_words:
                                     rejected_words.append(match)
                                     if match not in debug_stop_words:
                                         debug_stop_words.append(match)
+                                elif check_word_len and (len(match) <= 2 or len(match) >= 9):
+                                    rejected_words.append(match)
+                                    if match not in debug_word_len:
+                                        debug_word_len.append(match)
+                                elif use_infreq_word_filtering:
+                                    # TODO: implement word freq filtering
+                                    pass
+                                else:
+                                    sanitized_words.append(match)
 
 
                     sanitized_words_chars = list(' '.join(w for w in sanitized_words))
 
-                    if self.experiment_type != ExperimentType.STOP_WORD:
+                    if self.experiment_type == ExperimentType.BASELINE:
                         rejected_chars = list((nltk.Counter(raw_words_chars) - nltk.Counter(sanitized_words_chars)).elements())
-                    else:
+                    elif check_stop_word or check_word_len:
                         rejected_words_chars = list(' '.join(w for w in rejected_words))
                         rejected_chars = list((nltk.Counter(raw_words_chars) - nltk.Counter(rejected_words_chars)
                                                - nltk.Counter(sanitized_words_chars)).elements())
+                    elif self.experiment_type == ExperimentType.INFREQ_WORD:
+                        # TODO: implement word freq filtering
+                        rejected_chars = []
 
                     for c in rejected_chars:
                         rejected_words.append(c)
@@ -457,7 +498,7 @@ class NaiveBayesianClassifier:
 
 def main():
     # debug_print_csv()
-    # TODO: prompt user for name of dataset file, model year, and training year
+
     # file_name = prompt_user_dataset_file_name()
     # model_year = prompt_user_year('model')
     # test_year = prompt_user_year('test')
@@ -466,26 +507,26 @@ def main():
     file_name = './data/hns_2018_2019.csv'
     model_year = '2018'
     test_year = '2019'
-    experiment_type = 2
+    experiment_type = 1
 
-    naive_bayesian_classifier = NaiveBayesianClassifier(file_name, model_year, test_year, experiment_type)
+    classifier = NaiveBayesianClassifier(file_name, model_year, test_year, experiment_type)
 
-    naive_bayesian_classifier.read_csv_data()
+    classifier.read_csv_data()
 
-    naive_bayesian_classifier.dataset_model.train_dataset_model()
-    naive_bayesian_classifier.dataset_model.display_probabilities_classes()
+    classifier.dataset_model.train_dataset_model()
 
-    print(len(naive_bayesian_classifier.dataset_model.vocabulary))
+    print(len(classifier.dataset_model.vocabulary))
 
-    naive_bayesian_classifier.dataset_model.write_dataset_model_to_file(naive_bayesian_classifier.experiment_type)
+    classifier.dataset_model.write_dataset_model_to_file(classifier.experiment_type)
 
-    naive_bayesian_classifier.classify_test_dataset()
+    classifier.classify_test_dataset()
 
-    naive_bayesian_classifier.dataset_test.write_test_results_to_file(naive_bayesian_classifier.experiment_type)
+    classifier.dataset_test.write_test_results_to_file(classifier.experiment_type)
+    classifier.display_test_result()
 
     # debug
-    # naive_bayesian_classifier.dataset_model.display_conditional_probabilities()
-    # naive_bayesian_classifier.dataset_model.display_probabilities_classes()
+    # classifier.dataset_model.display_probabilities_classes()
+    # classifier.dataset_model.display_conditional_probabilities()
 
 
 if __name__ == '__main__':
