@@ -25,6 +25,15 @@ from nltk.tokenize import RegexpTokenizer
 
 BAYESIAN_SMOOTHING_VALUE = 0.5
 
+def csv_to_array(file_name):
+    lines = []
+    with open(file_name) as csvfile:
+        reader = csv.reader(csvfile, delimiter=',')
+        for row in reader:
+            lines.append(row)
+
+    return lines
+
 def debug_print_csv():
     with open("./data/hns_2018_2019.csv",'r') as f:
         rowReader = csv.reader(f, delimiter=',')
@@ -36,6 +45,7 @@ def debug_print_csv():
 
         for l in lines:
             print(l)
+
 def print_data_to_file(data, filename):
     file = open(f'./generated-data/{filename}', "w+")
     for item in data:
@@ -87,11 +97,19 @@ class ExperimentType(Enum):
 
 class Dataset:
     def __init__(self):
+        self.experiment_type = ExperimentType.BASELINE
         self.classifiers = {}
 
     def display_classifiers(self):
         for classifier in self.classifiers:
             print(classifier, end=', ')
+
+class ModelDocument:
+    def __init__(self, raw_title, sanitized_title, rejected_words, classifier):
+        self.raw_title = raw_title
+        self.sanitized_title = sanitized_title
+        self.rejected_words = rejected_words
+        self.classifier = classifier
 
 class ModelDataSet(Dataset):
     def __init__(self, year):
@@ -102,7 +120,9 @@ class ModelDataSet(Dataset):
         self.total_documents = 0
         self.num_docs_per_classifier = {}
         self.vocabulary = []
-        self.parent_ref = [self.classifiers]
+        # 2D array of the words rejected for each document
+        self.rejected_words = []
+        self.parent_ref = [self.classifiers, self.experiment_type]
         self.year = year
 
     def calculate_conditional_probability(self, word, classifier):
@@ -234,7 +254,7 @@ class ModelDataSet(Dataset):
 
             file.close()
 
-class Document:
+class TestDocument:
     def __init__(self, title, classifier):
         self.title = title
         self.true_class = classifier
@@ -256,7 +276,7 @@ class TestDataSet(Dataset):
 
         #  add the document to the test dataset
         if document not in self.documents:
-            self.documents.append(Document(document, classifier))
+            self.documents.append(TestDocument(document, classifier))
 
         # generate the frequency of each word for each classifier
         if document not in self.classifiers[classifier]:
@@ -308,15 +328,13 @@ class TestDataSet(Dataset):
 
 class NaiveBayesianClassifier:
 
-    def __init__(self, csv_file_name,  model_year, test_year, experiment_type):
-        self.csv_file_name = csv_file_name
+    def __init__(self, data,  model_year, test_year):
+        self.raw_data = data
+        self.sanitized_model_documents = []
+        self.sanitized_test_documents = []
         self.dataset_model = ModelDataSet(model_year)
         self.dataset_test = TestDataSet(test_year)
-        self.experiment_type = ExperimentType(experiment_type)
         self.stop_words = []
-
-        if self.experiment_type == ExperimentType.STOP_WORD:
-            self.parse_stop_words_from_file()
 
     def display_test_result(self):
             num_incorrect_classifications = 0
@@ -325,13 +343,13 @@ class NaiveBayesianClassifier:
                 if not document.is_prediction_correct:
                     num_incorrect_classifications += 1
 
-            if self.experiment_type == ExperimentType.BASELINE:
+            if self.dataset_test.experiment_type == ExperimentType.BASELINE:
                 label = 'Baseline'
-            if self.experiment_type == ExperimentType.STOP_WORD:
+            if self.dataset_test.experiment_type == ExperimentType.STOP_WORD:
                 label = 'Stop-word'
-            if self.experiment_type == ExperimentType.WORD_LEN:
+            if self.dataset_test.experiment_type == ExperimentType.WORD_LEN:
                 label = 'Word-length'
-            if self.experiment_type == ExperimentType.INFREQ_WORD:
+            if self.dataset_test.experiment_type == ExperimentType.INFREQ_WORD:
                 label = 'Infrequent word filtering'
 
             success_rate = ( 1 - num_incorrect_classifications/len(self.dataset_test.documents)) * 100
@@ -344,13 +362,28 @@ class NaiveBayesianClassifier:
                   f'# correctly classified documents: {len(self.dataset_test.documents) - num_incorrect_classifications}\n'
                   f'# incorrectly classified documents: {num_incorrect_classifications}')
 
+    def sanitize_document(self, document):
+        # generate the sanitized words from the current line based on the regex
+        regex = r'(\w+\,\w+)|(\w+\'\w+)|(\w+\’\w+)|(\w+-\w+(-*\w*)+)|(?!(\w+\,\w+)|(\w+\'\w+)|(\w+\’\w+)|(\w+-\w+(-*\w*)+))(\w+)'
+        tokenizer = RegexpTokenizer(regex)
+        sanitized_words_tuples = tokenizer.tokenize(document)
+        sanitized_words = []
+        for entry in sanitized_words_tuples:
+            matches = [e for e in entry if len(e) > 0]
+            if len(matches) > 1:
+                print('Something went wrong with the tokenization')
+            for match in matches:
+                if len(match) > 0:
+                    sanitized_words.append(match)
+        return ' '.join(w for w in sanitized_words)
+
     def parse_stop_words_from_file(self):
         with open('./data/stopwords.txt') as file:
             lines = file.read().splitlines()
         for word in lines:
             self.stop_words.append(word)
 
-    def read_csv_data(self):
+    def parse_data_baseline(self):
         # map to store which columns the desired data categories are contained
         data_categories_indices = {
             'title': -1,
@@ -358,119 +391,122 @@ class NaiveBayesianClassifier:
             'class': - 1
         }
 
-        with open(self.csv_file_name) as csv_file:
-            csv_reader = csv.reader(csv_file, delimiter=',')
-            current_row = 0
-            model_doc_ctr = 0
-            all_rejected_words = []
+        model_doc_ctr = 0
 
-            debug_print_titles = []
-            debug_stop_words = []
-            debug_word_len = []
+        for i, data in enumerate(self.raw_data):
+            # first row, parse the col categories
+            if i == 0:
+                for i, category in enumerate(data):
+                    # cleanup the string into readable format
+                    category = ''.join(category.split()).lower()
 
-            for row in csv_reader:
-                # first row, parse the col categories
-                if current_row == 0:
-                    for i, category in enumerate(row):
-                        # cleanup the string into readable format
-                        category = ''.join(category.split()).lower()
+                    if category == 'title':
+                        data_categories_indices['title'] = i
+                    elif category == 'posttype':
+                        data_categories_indices['class'] = i
+                    elif category == 'year':
+                        data_categories_indices['year'] = i
+            else:
+                year = data[data_categories_indices['year']]
+                classifier = data[data_categories_indices['class']]
+                document = data[data_categories_indices['title']].lower()
 
-                        if category == 'title':
-                            data_categories_indices['title'] = i
-                        elif category == 'posttype':
-                            data_categories_indices['class'] = i
-                        elif category == 'year':
-                            data_categories_indices['year'] = i
+                # sanitize the current document (title from csv file)
+                sanitized_document = self.sanitize_document(document)
 
-                    current_row += 1
-                else:
-                    year = row[data_categories_indices['year']]
-                    classifier = row[data_categories_indices['class']]
-                    title_string = row[data_categories_indices['title']].lower()
-                    raw_words_chars = list(title_string)
+                # store the sanitized document to be used to develop model for experiments later
+                if year == self.dataset_model.year:
+                    # determine which char are rejected based on set difference between the raw doc and sanitized doc
+                    sanitized_words_chars = list(sanitized_document)
+                    raw_document_chars = list(document)
+                    rejected_chars = list((nltk.Counter(raw_document_chars) - nltk.Counter(sanitized_words_chars)).elements())
+                    # parse the rejected chars back into words (for printing later)
+                    rejected_words = [c for c in rejected_chars]
 
-                    debug_print_titles.append(title_string)
-
-                    # generate the sanitized words from the current line
-                    regex = r'(\w+\,\w+)|(\w+\'\w+)|(\w+\’\w+)|(\w+-\w+(-*\w*)+)|(?!((\w+\,\w+)|(\w+\'\w+)|(\w+\’\w+)|(\w+-\w+(-*\w*)+)))(\w+)'
-                    tokenizer = RegexpTokenizer(regex)
-                    sanitized_words_tuples = tokenizer.tokenize(title_string)
-                    sanitized_words = []
-                    rejected_words = []
-
-                    check_stop_word = self.experiment_type == ExperimentType.STOP_WORD
-                    check_word_len = self.experiment_type == ExperimentType.WORD_LEN
-                    use_infreq_word_filtering = self.experiment_type == ExperimentType.INFREQ_WORD
-
-                    for entry in sanitized_words_tuples:
-                        matches = [e for e in entry if len(e) > 0]
-                        if len(matches) > 1:
-                            print('Something went wrong with the tokenization')
-                        for match in matches:
-                            if len(match) > 0:
-                                if check_stop_word and match in self.stop_words:
-                                    rejected_words.append(match)
-                                    if match not in debug_stop_words:
-                                        debug_stop_words.append(match)
-                                elif check_word_len and (len(match) <= 2 or len(match) >= 9):
-                                    rejected_words.append(match)
-                                    if match not in debug_word_len:
-                                        debug_word_len.append(match)
-                                elif use_infreq_word_filtering:
-                                    # TODO: implement word freq filtering
-                                    pass
-                                else:
-                                    sanitized_words.append(match)
-
-
-                    sanitized_words_chars = list(' '.join(w for w in sanitized_words))
-
-                    if self.experiment_type == ExperimentType.BASELINE:
-                        rejected_chars = list((nltk.Counter(raw_words_chars) - nltk.Counter(sanitized_words_chars)).elements())
-                    elif check_stop_word or check_word_len:
-                        rejected_words_chars = list(' '.join(w for w in rejected_words))
-                        rejected_chars = list((nltk.Counter(raw_words_chars) - nltk.Counter(rejected_words_chars)
-                                               - nltk.Counter(sanitized_words_chars)).elements())
-                    elif self.experiment_type == ExperimentType.INFREQ_WORD:
-                        # TODO: implement word freq filtering
-                        rejected_chars = []
-
-                    for c in rejected_chars:
-                        rejected_words.append(c)
-
-                    if len(rejected_words) > 0:
-                        rejected_words_line = '\t'.join(w for w in rejected_words)
-                    else:
-                        rejected_words_line=""
-
-                    all_rejected_words.append(rejected_words_line)
+                    self.sanitized_model_documents.append(
+                        ModelDocument(document, sanitized_document, rejected_words, classifier))
 
                     # determine the frequency of each word for each classifier for model
-                    if year == self.dataset_model.year:
-                        if classifier not in self.dataset_model.num_docs_per_classifier:
-                            self.dataset_model.num_docs_per_classifier[classifier] = 1
-                        else:
-                            current_num_docs = self.dataset_model.num_docs_per_classifier[classifier]
-                            self.dataset_model.num_docs_per_classifier[classifier] = current_num_docs + 1
+                    if classifier not in self.dataset_model.num_docs_per_classifier:
+                        self.dataset_model.num_docs_per_classifier[classifier] = 1
+                    else:
+                        current_num_docs = self.dataset_model.num_docs_per_classifier[classifier]
+                        self.dataset_model.num_docs_per_classifier[classifier] = current_num_docs + 1
+                    model_doc_ctr += 1
+                else:
+                    self.sanitized_test_documents.append(TestDocument(sanitized_document, classifier))
 
-                        self.dataset_model.generate_frequency_maps(classifier, sanitized_words)
-                        model_doc_ctr += 1
-                    # add the documents for the testing dataset (including their true classification)
-                    # classification to be approximated by naive bayesian classifier
-                    elif year == self.dataset_test.year:
-                        self.dataset_test.generate_test_documents(classifier, ' '.join(sanitized_words))
+        # set the total num of documents for the model (to be used later to calc probability of each class)
+        self.dataset_model.total_documents = model_doc_ctr
 
-                    current_row += 1
+    def generate_vocabulary(self, experiment_type):
+        # reset the vocabulary
+        self.dataset_model.vocabulary = []
+        self.dataset_model.experiment_type = experiment_type
+        self.dataset_test.experiment_type = experiment_type
 
-            print_data_to_file(debug_print_titles, 'debug_titles.txt')
+        if experiment_type == ExperimentType.STOP_WORD:
+            self.parse_stop_words_from_file()
 
-            # set the total num of documents for the model (to be used later to calc probability of each class)
-            self.dataset_model.total_documents = model_doc_ctr
+        for i, doc in enumerate(self.sanitized_model_documents):
+            words_in_doc = doc.sanitized_title.split()
 
-            # write rejected words to file
-            print_data_to_file(all_rejected_words, 'remove_word.txt')
-            # write the vocabulary to file
-            print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
+            if experiment_type == ExperimentType.BASELINE:
+                self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
+
+            elif experiment_type == ExperimentType.STOP_WORD:
+                for word in words_in_doc:
+                    if word in self.stop_words:
+                        words_in_doc.remove(word)
+                        doc.rejected_words.append(word)
+
+                self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
+
+            elif experiment_type == ExperimentType.WORD_LEN:
+                for word in words_in_doc:
+                    if len(word) <= 2 or len(word) >= 9:
+                        words_in_doc.remove(word)
+                        doc.rejected_words.append(word)
+
+                self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
+
+            elif experiment_type == ExperimentType.INFREQ_WORD:
+                # TODO: infreq experiement
+                pass
+
+            if len(doc.rejected_words) > 0:
+                rejected_words_line = '\t'.join(w for w in doc.rejected_words)
+            else:
+                rejected_words_line = ""
+
+            self.dataset_model.rejected_words.append(rejected_words_line)
+
+        # write rejected words to file
+        print_data_to_file(self.dataset_model.rejected_words, 'remove_word.txt')
+        # write the vocabulary to file
+        print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
+
+    def generate_testing_data(self):
+        for i, doc in enumerate(self.sanitized_test_documents):
+            words_in_doc = doc.title.split()
+
+            if self.dataset_test.experiment_type == ExperimentType.STOP_WORD:
+                for word in words_in_doc:
+                    if word in self.stop_words:
+                        words_in_doc.remove(word)
+
+            elif self.dataset_test.experiment_type == ExperimentType.WORD_LEN:
+                for word in words_in_doc:
+                    if len(word) <= 2 or len(word) >= 9:
+                        words_in_doc.remove(word)
+
+            elif self.dataset_test.experiment_type  == ExperimentType.INFREQ_WORD:
+                # TODO: infreq experiement
+                pass
+
+            # add the documents for the testing dataset (including their true classification)
+            # classification to be approximated by naive bayesian classifier
+            self.dataset_test.generate_test_documents(doc.true_class, doc.title)
 
     def classify_test_dataset(self):
         for document in self.dataset_test.documents:
@@ -481,10 +517,7 @@ class NaiveBayesianClassifier:
         for classifier in self.dataset_model.classifiers:
             score = self.dataset_model.probabilities_classes[classifier]
             for word in document.title.split():
-                if word in self.dataset_model.vocabulary \
-                    and word in self.dataset_model.conditional_probabilities \
-                    and classifier in self.dataset_model.conditional_probabilities[word]:
-
+                if word in self.dataset_model.vocabulary:
                     score = score + math.log10(self.dataset_model.conditional_probabilities[word][classifier])
                     document.class_scores[classifier] = score
 
@@ -492,8 +525,8 @@ class NaiveBayesianClassifier:
                 max_score = score
                 document.generated_class = classifier
 
-            if document.generated_class == document.true_class:
-                document.is_prediction_correct = True
+        if document.generated_class == document.true_class:
+            document.is_prediction_correct = True
 
 def main():
     # debug_print_csv()
@@ -506,25 +539,22 @@ def main():
     file_name = './data/hns_2018_2019.csv'
     model_year = '2018'
     test_year = '2019'
-    experiment_type = 4
 
-    classifier = NaiveBayesianClassifier(file_name, model_year, test_year, experiment_type)
+    data = csv_to_array(file_name)
 
-    classifier.read_csv_data()
+    classifier = NaiveBayesianClassifier(data, model_year, test_year)
+
+    classifier.parse_data_baseline()
+    classifier.generate_vocabulary(ExperimentType.INFREQ_WORD)
+    classifier.generate_testing_data()
 
     classifier.dataset_model.train_dataset_model()
-
-    classifier.dataset_model.write_dataset_model_to_file(classifier.experiment_type)
+    classifier.dataset_model.write_dataset_model_to_file(ExperimentType.INFREQ_WORD)
 
     # run the Naive Bayes Classifier
     classifier.classify_test_dataset()
-
-    classifier.dataset_test.write_test_results_to_file(classifier.experiment_type)
+    classifier.dataset_test.write_test_results_to_file(ExperimentType.INFREQ_WORD)
     classifier.display_test_result()
-
-    # debug
-    # classifier.dataset_model.display_probabilities_classes()
-    # classifier.dataset_model.display_conditional_probabilities()
 
 
 if __name__ == '__main__':
