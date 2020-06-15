@@ -71,6 +71,14 @@ def prompt_user_experiment_type():
 
     return experiment_type
 
+def get_experiment_filename(experiment_type):
+    if experiment_type == ExperimentType.BASELINE:
+        return 'baseline'
+    if experiment_type == ExperimentType.STOP_WORD:
+        return 'stopword'
+    if experiment_type == ExperimentType.WORD_LEN:
+        return 'wordlength'
+
 class ExperimentType(Enum):
     BASELINE = 1
     STOP_WORD = 2
@@ -170,53 +178,61 @@ class ModelDataSet(Dataset):
 
         self.vocabulary.sort()
 
-    def write_dataset_model_to_file(self):
-        file = open(f'./generated-data/model-{self.year}.txt', "w+")
+    def write_dataset_model_to_file(self, experiment_type):
+        if experiment_type != ExperimentType.INFREQ_WORD:
+            global filename
+            if experiment_type == ExperimentType.BASELINE:
+                filename = f'./generated-data/model-{self.year}.txt'
+            elif experiment_type == ExperimentType.STOP_WORD:
+                filename = f'./generated-data/stopword-model.txt'
+            elif experiment_type == ExperimentType.WORD_LEN:
+                filename = f'./generated-data/wordlength-model.txt'
 
-        classifier_order = [
-            'story',
-            'ask_hn',
-            'show_hn',
-            'poll'
-        ]
+            file = open(filename, "w+")
+            classifier_order = [
+                'story',
+                'ask_hn',
+                'show_hn',
+                'poll'
+            ]
 
-        delim = '  '
-        doc_lines_to_print = []
+            delim = '  '
+            doc_lines_to_print = []
 
-        for word in self.vocabulary:
-            line = word
-            classifiers = self.parent_ref[0]
-            for classifier in classifier_order:
-                if classifier in classifiers and word in classifiers[classifier]:
-                    frequency = classifiers[classifier][word]
-                    cond_probability = round(self.conditional_probabilities[word][classifier], 8)
-                    # add data for word and current class to line
-                    line += (f'{delim}{frequency}{delim}{cond_probability}')
-                elif classifier in classifiers and word not in classifiers[classifier]:
-                    frequency = 0
-                    cond_probability = round(self.conditional_probabilities[word][classifier], 8)
-                    # add data for word and current class to line
-                    line += (f'{delim}{frequency}{delim}{cond_probability}')
-                else:
-                    frequency = 0
-                    cond_probability = 0.0
-                    # add data for word and current class to line
-                    line += (f'{delim}{frequency}{delim}{cond_probability}')
-            # store line to be written later to file
-            doc_lines_to_print.append(line)
+            for word in self.vocabulary:
+                line = word
+                classifiers = self.parent_ref[0]
+                for classifier in classifier_order:
+                    if classifier in classifiers and word in classifiers[classifier]:
+                        frequency = classifiers[classifier][word]
+                        cond_probability = round(self.conditional_probabilities[word][classifier], 8)
+                        # add data for word and current class to line
+                        line += (f'{delim}{frequency}{delim}{cond_probability}')
+                    elif classifier in classifiers and word not in classifiers[classifier]:
+                        frequency = 0
+                        cond_probability = round(self.conditional_probabilities[word][classifier], 8)
+                        # add data for word and current class to line
+                        line += (f'{delim}{frequency}{delim}{cond_probability}')
+                    else:
+                        frequency = 0
+                        cond_probability = 0.0
+                        # add data for word and current class to line
+                        line += (f'{delim}{frequency}{delim}{cond_probability}')
+                # store line to be written later to file
+                doc_lines_to_print.append(line)
 
-        # sort entries alphabetically
-        doc_lines_to_print.sort()
+            # sort entries alphabetically
+            doc_lines_to_print.sort()
 
-        # prepend with line #
-        for i, line in enumerate(doc_lines_to_print):
-            doc_lines_to_print[i] = f'{i+1}{delim}{line}\n'
+            # prepend with line #
+            for i, line in enumerate(doc_lines_to_print):
+                doc_lines_to_print[i] = f'{i+1}{delim}{line}\n'
 
-        # write data to file
-        for l in doc_lines_to_print:
-            file.write(l)
+            # write data to file
+            for l in doc_lines_to_print:
+                file.write(l)
 
-        file.close()
+            file.close()
 
 class Document:
     def __init__(self, title, classifier):
@@ -248,44 +264,46 @@ class TestDataSet(Dataset):
         else:
             self.classifiers[classifier].append(document)
 
-    def write_test_results_to_file(self):
-        file = open(f'./generated-data/baseline-result.txt', "w+")
+    def write_test_results_to_file(self, experiment_type):
+        if experiment_type != ExperimentType.INFREQ_WORD:
+            filename = get_experiment_filename(experiment_type)
+            file = open(f'./generated-data/{filename}-result.txt', "w+")
 
-        classifier_order = [
-            'story',
-            'ask_hn',
-            'show_hn',
-            'poll'
-        ]
+            classifier_order = [
+                'story',
+                'ask_hn',
+                'show_hn',
+                'poll'
+            ]
 
-        delim = '  '
-        doc_lines_to_print = []
-        line_ctr = 1
+            delim = '  '
+            doc_lines_to_print = []
+            line_ctr = 1
 
-        for document in self.documents:
-            line = f'{line_ctr}{delim}{document.title}{delim}{document.generated_class}{delim}'
-            for classifier in classifier_order:
-                if classifier in document.class_scores:
-                    line += f'{document.class_scores[classifier]}{delim}'
+            for document in self.documents:
+                line = f'{line_ctr}{delim}{document.title}{delim}{document.generated_class}{delim}'
+                for classifier in classifier_order:
+                    if classifier in document.class_scores:
+                        line += f'{document.class_scores[classifier]}{delim}'
+                    else:
+                        line += f'0{delim}'
+
+                global label
+                if document.is_prediction_correct:
+                    label = 'right'
                 else:
-                    line += f'0{delim}'
+                    label = 'wrong'
 
-            global label
-            if document.is_prediction_correct:
-                label = 'right'
-            else:
-                label = 'wrong'
+                line += f'{document.true_class}{delim}{label}\n'
+                line_ctr += 1
+                # store line to be written later to file
+                doc_lines_to_print.append(line)
 
-            line += f'{document.true_class}{delim}{label}\n'
-            line_ctr += 1
-            # store line to be written later to file
-            doc_lines_to_print.append(line)
+            # write data to file
+            for l in doc_lines_to_print:
+                file.write(l)
 
-        # write data to file
-        for l in doc_lines_to_print:
-            file.write(l)
-
-        file.close()
+            file.close()
 
 class NaiveBayesianClassifier:
 
@@ -356,19 +374,24 @@ class NaiveBayesianClassifier:
                         if len(matches) > 1:
                             print('Something went wrong with the tokenization')
                         for match in matches:
+                            check_stop_word = (self.experiment_type == ExperimentType.STOP_WORD and match not in self.stop_words)
                             if len(match) > 0:
-                                sanitized_words.append(match)
+                                if check_stop_word or self.experiment_type != ExperimentType.STOP_WORD:
+                                    sanitized_words.append(match)
+                                else:
+                                    rejected_words.append(match)
+                                    if match not in debug_stop_words:
+                                        debug_stop_words.append(match)
 
-                    if self.experiment_type == ExperimentType.STOP_WORD and len(self.stop_words) > 0:
-                        for word in sanitized_words:
-                            if word in self.stop_words:
-                                sanitized_words.remove(word)
-                                rejected_words.append(word)
-                                debug_stop_words.append(word)
 
                     sanitized_words_chars = list(' '.join(w for w in sanitized_words))
 
-                    rejected_chars = list((nltk.Counter(raw_words_chars) - nltk.Counter(sanitized_words_chars)).elements())
+                    if self.experiment_type != ExperimentType.STOP_WORD:
+                        rejected_chars = list((nltk.Counter(raw_words_chars) - nltk.Counter(sanitized_words_chars)).elements())
+                    else:
+                        rejected_words_chars = list(' '.join(w for w in rejected_words))
+                        rejected_chars = list((nltk.Counter(raw_words_chars) - nltk.Counter(rejected_words_chars)
+                                               - nltk.Counter(sanitized_words_chars)).elements())
 
                     for c in rejected_chars:
                         rejected_words.append(c)
@@ -407,8 +430,7 @@ class NaiveBayesianClassifier:
             # write the vocabulary to file
             print_data_to_file(self.dataset_model.vocabulary, 'vocabulary.txt')
 
-            for w in debug_stop_words:
-                print(w)
+            print(len(debug_stop_words))
 
     def classify_test_dataset(self):
         for document in self.dataset_test.documents:
@@ -444,7 +466,7 @@ def main():
     file_name = './data/hns_2018_2019.csv'
     model_year = '2018'
     test_year = '2019'
-    experiment_type = 1
+    experiment_type = 2
 
     naive_bayesian_classifier = NaiveBayesianClassifier(file_name, model_year, test_year, experiment_type)
 
@@ -455,10 +477,11 @@ def main():
 
     print(len(naive_bayesian_classifier.dataset_model.vocabulary))
 
-    # naive_bayesian_classifier.dataset_model.write_dataset_model_to_file()
-    #
-    # naive_bayesian_classifier.classify_test_dataset()
-    # naive_bayesian_classifier.dataset_test.write_test_results_to_file()
+    naive_bayesian_classifier.dataset_model.write_dataset_model_to_file(naive_bayesian_classifier.experiment_type)
+
+    naive_bayesian_classifier.classify_test_dataset()
+
+    naive_bayesian_classifier.dataset_test.write_test_results_to_file(naive_bayesian_classifier.experiment_type)
 
     # debug
     # naive_bayesian_classifier.dataset_model.display_conditional_probabilities()
