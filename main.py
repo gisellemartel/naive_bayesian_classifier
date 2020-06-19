@@ -11,8 +11,6 @@ import nltk
 import matplotlib
 matplotlib.use('TKAgg')
 import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, confusion_matrix
 from enum import Enum
 
@@ -320,7 +318,7 @@ class NaiveBayesianClassifier:
             label = 'Infrequent word filtering'
 
         print(f'* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * \n\n'
-              f'{label} experiment yielded a classification success rate of: {round(self.classification_success_rate, 3)}%\n')
+              f'{label} experiment yielded a classification success rate of: {round(self.classification_success_rate, 3)*100}%\n')
         print(f'Model Statistics:\n'
               f'# words in model vocabulary: {len(self.dataset_model.vocabulary)}\n'
               f'# documents in test dataset: {len(self.dataset_test.documents)}\n'
@@ -479,14 +477,13 @@ class NaiveBayesianClassifier:
                         self.dataset_model.total_word_count_foreach_class[classifier] -= 1
 
             self.dataset_model.train_dataset_model()
-            self.classify_test_dataset()
-
-            # TODO: parse the vocab size as x values, and the score as y-values
             self.word_filtering_graph_data_1.vocabulary_sizes.append(len(self.dataset_model.vocabulary))
 
             for measurement_type in self.word_filtering_graph_data_1.classifier_scores:
+                self.classify_test_dataset(measurement_type)
                 scores = self.word_filtering_graph_data_1.classifier_scores[measurement_type]
                 scores.append(self.classification_success_rate)
+
 
     def generate_most_frequent_word_filtering(self):
         frequency_thresholds = [
@@ -512,15 +509,18 @@ class NaiveBayesianClassifier:
         f_measure_vals = self.word_filtering_graph_data_1.classifier_scores['f-measure']
         plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, accuracy_vals, marker='*', color='r')
         plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, precision_vals, marker='X', color='green')
-        plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, recall_vals, marker='r', color='orange')
+        plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, recall_vals, marker='2', color='orange')
         plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, f_measure_vals, marker='$...$', color='blue')
         plt.xlabel('Vocabulary Size')
         plt.ylabel('Classification Success Rate')
         plt.title('Infrequent Words Classifier Experiment')
         plt.show()
 
-    def classify_test_dataset(self):
+    def classify_test_dataset(self, score_type = 'accuracy'):
         self.num_correct_classifications = 0
+
+        y_true = []
+        y_pred = []
 
         for document in self.dataset_test.documents:
             max_score = -math.inf
@@ -540,7 +540,17 @@ class NaiveBayesianClassifier:
                 # need to store if prediction was correct to print later in results file
                 document.is_prediction_correct = True
 
-        self.classification_success_rate = (self.num_correct_classifications / len(self.dataset_test.documents)) * 100
+            y_pred.append(document.generated_class)
+            y_true.append(document.true_class)
+
+        if score_type == 'accuracy':
+            self.classification_success_rate = accuracy_score(y_true, y_pred)
+        elif score_type == 'precision':
+            self.classification_success_rate = precision_score(y_true, y_pred, average='weighted')
+        elif score_type == 'f-score':
+            self.classification_success_rate = f1_score(y_true, y_pred, average='weighted')
+        elif score_type == 'recall':
+            self.classification_success_rate = recall_score(y_true, y_pred, average='weighted')
 
     def do_experiment(self, experiment_type):
         if experiment_type != ExperimentType.INFREQUENT_WORDS:
