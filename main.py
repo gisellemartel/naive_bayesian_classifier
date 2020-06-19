@@ -8,8 +8,12 @@ import csv
 import math
 import ssl
 import nltk
+import matplotlib
+matplotlib.use('TKAgg')
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, confusion_matrix
 from enum import Enum
 
 try:
@@ -106,7 +110,7 @@ class ModelDataSet(Dataset):
         super().__init__()
         self.total_word_count_foreach_class = {}
         self.conditional_probabilities = {}
-        self.probabilities_classes = {}
+        self.classes_probabilities = {}
         self.total_documents = 0
         self.num_docs_per_classifier = {}
         self.vocabulary = []
@@ -121,10 +125,10 @@ class ModelDataSet(Dataset):
         else:
             word_count = 0
 
-        total_word_count = self.total_word_count_foreach_class[classifier]
+        word_count_class = self.total_word_count_foreach_class[classifier]
 
         # P( word | classifier) with smoothing
-        return (word_count + BAYESIAN_SMOOTHING_VALUE) / (total_word_count + len(self.vocabulary))
+        return (word_count + BAYESIAN_SMOOTHING_VALUE) / (word_count_class + BAYESIAN_SMOOTHING_VALUE * len(self.vocabulary))
 
     def calculate_classifier_probability(self, classifier):
         # P(classifier)
@@ -132,7 +136,7 @@ class ModelDataSet(Dataset):
 
     def train_dataset_model(self):
         self.conditional_probabilities = {}
-        self.probabilities_classes = {}
+        self.classes_probabilities = {}
         for classifier in self.classifiers:
             for word in self.vocabulary:
                 if word not in self.conditional_probabilities:
@@ -140,9 +144,8 @@ class ModelDataSet(Dataset):
                 # determine the probability of having the curr word given the curr class
                 self.conditional_probabilities[word][classifier] = self.calculate_conditional_probability(word,
                                                                                                           classifier)
-
             # determine the probability of the current class within the model
-            self.probabilities_classes[classifier] = self.calculate_classifier_probability(classifier)
+            self.classes_probabilities[classifier] = self.calculate_classifier_probability(classifier)
 
     def display_word_frequencies(self):
         for category in self.classifiers:
@@ -175,7 +178,6 @@ class ModelDataSet(Dataset):
 
     def write_dataset_model_to_file(self, experiment_type):
         if experiment_type != ExperimentType.INFREQUENT_WORDS:
-
             classifier_order = [
                 'story',
                 'ask_hn',
@@ -185,15 +187,15 @@ class ModelDataSet(Dataset):
 
             model_data = []
 
-            columns = ['#','word','freq','P']
-            line = ""
-            line += '{:<8}'.format(columns[0])
-            line += '{:<24}'.format(columns[1])
-            for i in range(4):
-                line += '{:<6}'.format(columns[2])
-                line += '{:<12}'.format(columns[3])
-            line += '\n'
-            model_data.append(line)
+            # columns = ['#','word','freq','P']
+            # line = ""
+            # line += '{:<8}'.format(columns[0])
+            # line += '{:<24}'.format(columns[1])
+            # for i in range(4):
+            #     line += '{:<6}'.format(columns[2])
+            #     line += '{:<12}'.format(columns[3])
+            # line += '\n'
+            # model_data.append(line)
 
             for i, word in enumerate(self.vocabulary):
                 line = '{:<8}'.format(i+1)
@@ -282,7 +284,12 @@ class TestDataSet(Dataset):
 class GraphData:
     def __init__(self):
         self.vocabulary_sizes = []
-        self.classifier_scores = []
+        self.classifier_scores = {
+            'accuracy': [],
+            'precision': [],
+            'recall': [],
+            'f-measure': []
+        }
 
 
 class NaiveBayesianClassifier:
@@ -290,28 +297,19 @@ class NaiveBayesianClassifier:
     def __init__(self, data, model_year, test_year):
         self.raw_data = data
         self.sanitized_model_documents = []
+
         self.dataset_model = ModelDataSet(model_year)
         self.dataset_test = TestDataSet(test_year)
+
         self.stop_words = []
+
         self.word_filtering_graph_data_1 = GraphData()
         self.word_filtering_graph_data_2 = GraphData()
 
-    def calc_success_rate(self):
-        num_incorrect_classifications = 0
-
-        for document in self.dataset_test.documents:
-            if not document.is_prediction_correct:
-                num_incorrect_classifications += 1
-
-        return (1 - num_incorrect_classifications / len(self.dataset_test.documents)) * 100
+        self.num_correct_classifications = 0
+        self.classification_success_rate = 0.0
 
     def display_test_result(self):
-        num_incorrect_classifications = 0
-
-        for document in self.dataset_test.documents:
-            if not document.is_prediction_correct:
-                num_incorrect_classifications += 1
-
         if self.dataset_test.experiment_type == ExperimentType.BASELINE:
             label = 'Baseline'
         if self.dataset_test.experiment_type == ExperimentType.STOP_WORD:
@@ -321,15 +319,13 @@ class NaiveBayesianClassifier:
         if self.dataset_test.experiment_type == ExperimentType.INFREQUENT_WORDS:
             label = 'Infrequent word filtering'
 
-        success_rate = (1 - num_incorrect_classifications / len(self.dataset_test.documents)) * 100
-
         print(f'* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * \n\n'
-              f'{label} experiment yielded a classification success rate of: {success_rate}%\n')
+              f'{label} experiment yielded a classification success rate of: {round(self.classification_success_rate, 3)}%\n')
         print(f'Model Statistics:\n'
               f'# words in model vocabulary: {len(self.dataset_model.vocabulary)}\n'
               f'# documents in test dataset: {len(self.dataset_test.documents)}\n'
-              f'# correctly classified documents: {len(self.dataset_test.documents) - num_incorrect_classifications}\n'
-              f'# incorrectly classified documents: {num_incorrect_classifications}')
+              f'# correctly classified documents: {self.num_correct_classifications}\n'
+              f'# incorrectly classified documents: {len(self.dataset_test.documents) - self.num_correct_classifications}')
 
     def sanitize_document(self, document):
         # generate the sanitized words from the current line based on the regex
@@ -427,10 +423,12 @@ class NaiveBayesianClassifier:
                     self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
 
                 elif experiment_type == ExperimentType.STOP_WORD:
+                    removed_words_ctr = 0
                     for word in words_in_doc:
                         if word in self.stop_words:
                             words_in_doc.remove(word)
                             doc.rejected_words.append(word)
+                            removed_words_ctr += 1
 
                     self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
 
@@ -480,13 +478,15 @@ class NaiveBayesianClassifier:
                         self.dataset_model.classifiers[classifier][word] = 0
                         self.dataset_model.total_word_count_foreach_class[classifier] -= 1
 
+            self.dataset_model.train_dataset_model()
+            self.classify_test_dataset()
+
             # TODO: parse the vocab size as x values, and the score as y-values
             self.word_filtering_graph_data_1.vocabulary_sizes.append(len(self.dataset_model.vocabulary))
 
-            self.generate_testing_data()
-            self.dataset_model.train_dataset_model()
-            self.classify_test_dataset()
-            print(self.calc_success_rate())
+            for measurement_type in self.word_filtering_graph_data_1.classifier_scores:
+                scores = self.word_filtering_graph_data_1.classifier_scores[measurement_type]
+                scores.append(self.classification_success_rate)
 
     def generate_most_frequent_word_filtering(self):
         frequency_thresholds = [
@@ -502,44 +502,61 @@ class NaiveBayesianClassifier:
             # TODO: parse the vocab size as x values, and the score as y-values
             self.word_filtering_graph_data_2.vocabulary_sizes.append(len(self.dataset_model.vocabulary))
 
-        self.generate_testing_data()
         self.dataset_model.train_dataset_model()
         self.classify_test_dataset()
 
+    def plot_infrequent_words_results(self):
+        accuracy_vals = self.word_filtering_graph_data_1.classifier_scores['accuracy']
+        precision_vals = self.word_filtering_graph_data_1.classifier_scores['precision']
+        recall_vals = self.word_filtering_graph_data_1.classifier_scores['recall']
+        f_measure_vals = self.word_filtering_graph_data_1.classifier_scores['f-measure']
+        plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, accuracy_vals, marker='*', color='r')
+        plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, precision_vals, marker='X', color='green')
+        plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, recall_vals, marker='r', color='orange')
+        plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, f_measure_vals, marker='$...$', color='blue')
+        plt.xlabel('Vocabulary Size')
+        plt.ylabel('Classification Success Rate')
+        plt.title('Infrequent Words Classifier Experiment')
+        plt.show()
+
     def classify_test_dataset(self):
+        self.num_correct_classifications = 0
+
         for document in self.dataset_test.documents:
-            self.classify(document)
+            max_score = -math.inf
+            for classifier in self.dataset_model.classifiers:
+                score = self.dataset_model.classes_probabilities[classifier]
+                for word in document.title.split():
+                    if word in self.dataset_model.vocabulary:
+                        score = score + math.log10(self.dataset_model.conditional_probabilities[word][classifier])
+                        document.class_scores[classifier] = score
 
-    def classify(self, document):
-        max_score = -math.inf
-        for classifier in self.dataset_model.classifiers:
-            score = self.dataset_model.probabilities_classes[classifier]
-            for word in document.title.split():
-                if word in self.dataset_model.vocabulary:
-                    score = score + math.log10(self.dataset_model.conditional_probabilities[word][classifier])
-                    document.class_scores[classifier] = score
+                if score > max_score:
+                    max_score = score
+                    document.generated_class = classifier
 
-            if score > max_score:
-                max_score = score
-                document.generated_class = classifier
+            if document.generated_class == document.true_class:
+                self.num_correct_classifications += 1
+                # need to store if prediction was correct to print later in results file
+                document.is_prediction_correct = True
 
-        if document.generated_class == document.true_class:
-            document.is_prediction_correct = True
+        self.classification_success_rate = (self.num_correct_classifications / len(self.dataset_test.documents)) * 100
 
     def do_experiment(self, experiment_type):
         if experiment_type != ExperimentType.INFREQUENT_WORDS:
             self.generate_vocabulary(experiment_type)
             self.dataset_model.train_dataset_model()
-            self.dataset_model.write_dataset_model_to_file_debug(experiment_type)
-            # self.dataset_model.write_dataset_model_to_file(experiment_type)
+            self.dataset_model.write_dataset_model_to_file(experiment_type)
+
             # run the Naive Bayes Classifier
-            # self.classify_test_dataset()
-            # self.dataset_test.write_test_results_to_file(experiment_type)
-            # self.display_test_result()
+            self.classify_test_dataset()
+            self.dataset_test.write_test_results_to_file(experiment_type)
+            self.display_test_result()
         else:
             #TODO: finish!!!!!
             self.generate_least_frequent_word_filtering()
             # self.generate_most_frequent_word_filtering()
+            self.plot_infrequent_words_results()
 
 
 def main():
@@ -554,10 +571,10 @@ def main():
     classifier = NaiveBayesianClassifier(data, model_year, test_year)
     classifier.parse_data_baseline()
 
-    classifier.do_experiment(ExperimentType.BASELINE)
+    # classifier.do_experiment(ExperimentType.BASELINE)
     # classifier.do_experiment(ExperimentType.STOP_WORD)
     # classifier.do_experiment(ExperimentType.WORD_LEN)
-    # classifier.do_experiment(ExperimentType.INFREQ_WORD)
+    classifier.do_experiment(ExperimentType.INFREQUENT_WORDS)
 
 
 if __name__ == '__main__':
