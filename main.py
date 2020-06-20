@@ -6,12 +6,13 @@
 
 import csv
 import math
+import os
 import ssl
 import nltk
 import matplotlib
 matplotlib.use('TKAgg')
 import matplotlib.pyplot as plt
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from enum import Enum
 
 try:
@@ -116,6 +117,17 @@ class ModelDataSet(Dataset):
         self.rejected_words = []
         self.parent_ref = [self.classifiers, self.experiment_type]
         self.year = year
+
+    def reset_data(self):
+        self.total_word_count_foreach_class = {}
+        self.conditional_probabilities = {}
+        self.classes_probabilities = {}
+        self.total_documents = 0
+        self.num_docs_per_classifier = {}
+        self.vocabulary = []
+        # 2D array of the words rejected for each document
+        self.rejected_words = []
+        self.classifiers = {}
 
     def calculate_conditional_probability(self, word, classifier):
         if word in self.classifiers[classifier]:
@@ -312,6 +324,22 @@ class NaiveBayesianClassifier:
             'f-score': 0.0
         }
 
+    # resets the so that new model can be generated
+    def reset_classifier(self):
+        self.sanitized_model_documents = []
+        self.dataset_model.reset_data()
+        self.stop_words = []
+        self.word_filtering_graph_data_1 = GraphData()
+        self.word_filtering_graph_data_2 = GraphData()
+
+        self.num_correct_classifications = 0
+        self.classification_success_rates = {
+            'accuracy': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'f-score': 0.0
+        }
+
     def display_test_result(self):
         if self.dataset_test.experiment_type == ExperimentType.BASELINE:
             label = 'Baseline'
@@ -322,7 +350,7 @@ class NaiveBayesianClassifier:
         if self.dataset_test.experiment_type == ExperimentType.INFREQUENT_WORDS:
             label = 'Infrequent word filtering'
 
-        accuracy = self.classification_success_rate['accuracy']*100
+        accuracy = self.classification_success_rates['accuracy']*100
         precision = self.classification_success_rates['precision']*100
         recall = self.classification_success_rates['recall']*100
         f_score = self.classification_success_rates['f-score']*100
@@ -330,9 +358,9 @@ class NaiveBayesianClassifier:
         print(f'* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * \n\n'
               f'{label} experiment yielded a classification success rate of:\n'
               f'accuracy: {round(accuracy, 3)}%\n'
-              f'precision: {round(precision,3)}\n'
-              f'recall: {round(recall, 3)}\n'
-              f'f-score: {round(f_score, 3)}\n')
+              f'precision: {round(precision,3)}%\n'
+              f'recall: {round(recall, 3)}%\n'
+              f'f-score: {round(f_score, 3)}%\n')
         print(f'Model Statistics:\n'
               f'# words in model vocabulary: {len(self.dataset_model.vocabulary)}\n'
               f'# documents in test dataset: {len(self.dataset_test.documents)}\n'
@@ -361,6 +389,60 @@ class NaiveBayesianClassifier:
             lines = file.read().splitlines()
         for word in lines:
             self.stop_words.append(word)
+
+    def generate_new_model(self, file_name):
+        data = csv_to_array(file_name)
+        self.reset_classifier()
+
+        data_categories_indices = {
+            'title': -1,
+            'year': -1,
+            'class': - 1
+        }
+
+        model_doc_ctr = 0
+
+        for i, data in enumerate(data):
+            # first row, parse the col categories
+            if i == 0:
+                for i, category in enumerate(data):
+                    # cleanup the string into readable format
+                    category = ''.join(category.split()).lower()
+
+                    if category == 'title':
+                        data_categories_indices['title'] = i
+                    elif category == 'posttype':
+                        data_categories_indices['class'] = i
+
+            else:
+                classifier = data[data_categories_indices['class']]
+                document = data[data_categories_indices['title']].lower()
+
+                # sanitize the current document (title from csv file)
+                sanitized_document = self.sanitize_document(document)
+
+                # determine which char are rejected based on set difference between the raw doc and sanitized doc
+                sanitized_words_chars = list(sanitized_document)
+                raw_document_chars = list(document)
+                rejected_chars = list(
+                    (nltk.Counter(raw_document_chars) - nltk.Counter(sanitized_words_chars)).elements())
+                # parse the rejected chars back into words (for printing later)
+                rejected_words = [c for c in rejected_chars]
+
+                self.sanitized_model_documents.append(
+                    ModelDocument(document, sanitized_document, rejected_words, classifier))
+
+                # determine the frequency of each word for each classifier for model
+                if classifier not in self.dataset_model.num_docs_per_classifier:
+                    self.dataset_model.num_docs_per_classifier[classifier] = 1
+                else:
+                    current_num_docs = self.dataset_model.num_docs_per_classifier[classifier]
+                    self.dataset_model.num_docs_per_classifier[classifier] = current_num_docs + 1
+                model_doc_ctr += 1
+
+
+        # set the total num of documents for the model (to be used later to calc probability of each class)
+        self.dataset_model.total_documents = model_doc_ctr
 
     def parse_data_baseline(self):
         # map to store which columns the desired data categories are contained
@@ -596,9 +678,9 @@ class NaiveBayesianClassifier:
 
 
         self.classification_success_rates['accuracy'] = accuracy_score(y_true, y_pred)
-        self.classification_success_rates['precision'] = precision_score(y_true, y_pred, average='macro')
-        self.classification_success_rates['f-score'] = f1_score(y_true, y_pred, average='macro')
-        self.classification_success_rates['recall'] = recall_score(y_true, y_pred, average='macro')
+        self.classification_success_rates['precision'] = precision_score(y_true, y_pred, average='weighted')
+        self.classification_success_rates['recall'] = recall_score(y_true, y_pred, average='weighted')
+        self.classification_success_rates['f-score'] = f1_score(y_true, y_pred, average='weighted')
 
     def do_experiment(self, experiment_type):
         if experiment_type != ExperimentType.INFREQUENT_WORDS:
@@ -612,9 +694,17 @@ class NaiveBayesianClassifier:
             self.display_test_result()
         else:
             self.generate_least_frequent_word_filtering()
-            # self.generate_most_frequent_word_filtering()
+            self.generate_most_frequent_word_filtering()
             self.plot_infrequent_words_results([self.word_filtering_graph_data_1, self.word_filtering_graph_data_2])
 
+def prompt_user_dataset_file_name():
+    filename = './data/'
+    while not os.path.isfile(filename):
+        filename = input("Enter the name of the dataset file (must be located in ./data): ")
+        filename = f'./data/{filename}'
+        if not os.path.isfile(filename):
+            print('Did not enter a valid file name! Try again')
+    return filename
 
 def main():
     # debug_print_csv()
@@ -628,9 +718,17 @@ def main():
     classifier = NaiveBayesianClassifier(data, model_year, test_year)
     classifier.parse_data_baseline()
 
-    # classifier.do_experiment(ExperimentType.BASELINE)
-    # classifier.do_experiment(ExperimentType.STOP_WORD)
-    # classifier.do_experiment(ExperimentType.WORD_LEN)
+    classifier.do_experiment(ExperimentType.BASELINE)
+    classifier.do_experiment(ExperimentType.STOP_WORD)
+    classifier.do_experiment(ExperimentType.WORD_LEN)
+    classifier.do_experiment(ExperimentType.INFREQUENT_WORDS)
+
+    file_name = prompt_user_dataset_file_name()
+    classifier.generate_new_model(file_name)
+
+    classifier.do_experiment(ExperimentType.BASELINE)
+    classifier.do_experiment(ExperimentType.STOP_WORD)
+    classifier.do_experiment(ExperimentType.WORD_LEN)
     classifier.do_experiment(ExperimentType.INFREQUENT_WORDS)
 
 
