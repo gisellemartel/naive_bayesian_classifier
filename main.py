@@ -325,7 +325,7 @@ class NaiveBayesianClassifier:
         }
 
     # resets the so that new model can be generated
-    def reset_classifier(self):
+    def reset_classifier(self, reset_test_data = False):
         self.sanitized_model_documents = []
         self.dataset_model.reset_data()
         self.stop_words = []
@@ -339,6 +339,9 @@ class NaiveBayesianClassifier:
             'recall': 0.0,
             'f-score': 0.0
         }
+
+        if reset_test_data:
+            self.dataset_test.documents = []
 
     def display_test_result(self):
         if self.dataset_test.experiment_type == ExperimentType.BASELINE:
@@ -444,7 +447,11 @@ class NaiveBayesianClassifier:
         # set the total num of documents for the model (to be used later to calc probability of each class)
         self.dataset_model.total_documents = model_doc_ctr
 
-    def parse_data_baseline(self):
+    def parse_data_baseline(self, file_name=''):
+        if file_name:
+            self.raw_data = csv_to_array(file_name)
+            self.reset_classifier(True)
+
         # map to store which columns the desired data categories are contained
         data_categories_indices = {
             'title': -1,
@@ -693,9 +700,11 @@ class NaiveBayesianClassifier:
             self.dataset_test.write_test_results_to_file(experiment_type)
             self.display_test_result()
         else:
-            self.generate_least_frequent_word_filtering()
-            self.generate_most_frequent_word_filtering()
-            self.plot_infrequent_words_results([self.word_filtering_graph_data_1, self.word_filtering_graph_data_2])
+            pass
+            # TODO: FIX BUG
+            # self.generate_least_frequent_word_filtering()
+            # self.generate_most_frequent_word_filtering()
+            # self.plot_infrequent_words_results([self.word_filtering_graph_data_1, self.word_filtering_graph_data_2])
 
 def prompt_user_dataset_file_name():
     filename = './data/'
@@ -706,9 +715,18 @@ def prompt_user_dataset_file_name():
             print('Did not enter a valid file name! Try again')
     return filename
 
+def prompt_user_test_data():
+    response = ''
+    while response == '':
+        response = input("Enter y if you would like to have new training data ")
+
+    if response == 'y':
+        return True
+    else:
+        return False
+
 def main():
     # debug_print_csv()
-
     file_name = './data/hns_2018_2019.csv'
     model_year = '2018'
     test_year = '2019'
@@ -724,7 +742,14 @@ def main():
     classifier.do_experiment(ExperimentType.INFREQUENT_WORDS)
 
     file_name = prompt_user_dataset_file_name()
-    classifier.generate_new_model(file_name)
+    gen_new_test_data = prompt_user_test_data()
+
+    # if the user wants to generate both new model and training set
+    if gen_new_test_data:
+        classifier.parse_data_baseline(file_name)
+    # generate new model only using previously stored testing set
+    else:
+        classifier.generate_new_model(file_name)
 
     classifier.do_experiment(ExperimentType.BASELINE)
     classifier.do_experiment(ExperimentType.STOP_WORD)
