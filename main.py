@@ -286,7 +286,7 @@ class GraphData:
             'accuracy': [],
             'precision': [],
             'recall': [],
-            'f-measure': []
+            'f-score': []
         }
 
 
@@ -305,7 +305,12 @@ class NaiveBayesianClassifier:
         self.word_filtering_graph_data_2 = GraphData()
 
         self.num_correct_classifications = 0
-        self.classification_success_rate = 0.0
+        self.classification_success_rates = {
+            'accuracy': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'f-score': 0.0
+        }
 
     def display_test_result(self):
         if self.dataset_test.experiment_type == ExperimentType.BASELINE:
@@ -317,8 +322,17 @@ class NaiveBayesianClassifier:
         if self.dataset_test.experiment_type == ExperimentType.INFREQUENT_WORDS:
             label = 'Infrequent word filtering'
 
+        accuracy = self.classification_success_rate['accuracy']*100
+        precision = self.classification_success_rates['precision']*100
+        recall = self.classification_success_rates['recall']*100
+        f_score = self.classification_success_rates['f-score']*100
+
         print(f'* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * \n\n'
-              f'{label} experiment yielded a classification success rate of: {round(self.classification_success_rate, 3)*100}%\n')
+              f'{label} experiment yielded a classification success rate of:\n'
+              f'accuracy: {round(accuracy, 3)}%\n'
+              f'precision: {round(precision,3)}\n'
+              f'recall: {round(recall, 3)}\n'
+              f'f-score: {round(f_score, 3)}\n')
         print(f'Model Statistics:\n'
               f'# words in model vocabulary: {len(self.dataset_model.vocabulary)}\n'
               f'# documents in test dataset: {len(self.dataset_test.documents)}\n'
@@ -484,10 +498,10 @@ class NaiveBayesianClassifier:
             self.dataset_model.train_dataset_model()
             self.word_filtering_graph_data_1.vocabulary_sizes.append(len(self.dataset_model.vocabulary))
 
-            for measurement_type in self.word_filtering_graph_data_1.classifier_scores:
-                self.classify_test_dataset(measurement_type)
+            self.classify_test_dataset()
+            for measurement_type in self.classification_success_rates:
                 scores = self.word_filtering_graph_data_1.classifier_scores[measurement_type]
-                scores.append(self.classification_success_rate)
+                scores.append(self.classification_success_rates[measurement_type])
 
     def generate_most_frequent_word_filtering(self):
         # top 5%, 10%, 15%, etc frequent words
@@ -531,10 +545,10 @@ class NaiveBayesianClassifier:
             self.dataset_model.train_dataset_model()
             self.word_filtering_graph_data_2.vocabulary_sizes.append(len(self.dataset_model.vocabulary))
 
-            for measurement_type in self.word_filtering_graph_data_2.classifier_scores:
-                self.classify_test_dataset(measurement_type)
+            self.classify_test_dataset()
+            for measurement_type in self.classification_success_rates:
                 scores = self.word_filtering_graph_data_2.classifier_scores[measurement_type]
-                scores.append(self.classification_success_rate)
+                scores.append(self.classification_success_rates[measurement_type])
 
     def plot_infrequent_words_results(self, graphs_data):
         fig, axes = plt.subplots(1, len(graphs_data))
@@ -553,7 +567,7 @@ class NaiveBayesianClassifier:
         fig.title('Infrequent Words Classifier Experiment')
         plt.show()
 
-    def classify_test_dataset(self, score_type = 'accuracy'):
+    def classify_test_dataset(self):
         self.num_correct_classifications = 0
 
         y_true = []
@@ -580,14 +594,11 @@ class NaiveBayesianClassifier:
             y_pred.append(document.generated_class)
             y_true.append(document.true_class)
 
-        if score_type == 'accuracy':
-            self.classification_success_rate = accuracy_score(y_true, y_pred)
-        elif score_type == 'precision':
-            self.classification_success_rate = precision_score(y_true, y_pred, average='macro')
-        elif score_type == 'f-score':
-            self.classification_success_rate = f1_score(y_true, y_pred, average='macro')
-        elif score_type == 'recall':
-            self.classification_success_rate = recall_score(y_true, y_pred, average='macro')
+
+            self.classification_success_rates['accuracy'] = accuracy_score(y_true, y_pred)
+            self.classification_success_rates['precision'] = precision_score(y_true, y_pred, average='macro')
+            self.classification_success_rates['f-score'] = f1_score(y_true, y_pred, average='macro')
+            self.classification_success_rates['recall'] = recall_score(y_true, y_pred, average='macro')
 
     def do_experiment(self, experiment_type):
         if experiment_type != ExperimentType.INFREQUENT_WORDS:
@@ -601,7 +612,7 @@ class NaiveBayesianClassifier:
             self.display_test_result()
         else:
             self.generate_least_frequent_word_filtering()
-            self.generate_most_frequent_word_filtering()
+            # self.generate_most_frequent_word_filtering()
             self.plot_infrequent_words_results()
 
 
