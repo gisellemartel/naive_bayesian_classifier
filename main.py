@@ -646,14 +646,21 @@ class NaiveBayesianClassifier:
             precision_vals = graph_data.classifier_scores['precision']
             recall_vals = graph_data.classifier_scores['recall']
             f_measure_vals = graph_data.classifier_scores['f-score']
-            axes[i].scatter(graph_data.vocabulary_sizes, accuracy_vals, marker='*', color='r')
-            axes[i].scatter(graph_data.vocabulary_sizes, precision_vals, marker='X', color='green')
-            axes[i].scatter(graph_data.vocabulary_sizes, recall_vals, marker='2', color='orange')
-            axes[i].scatter(graph_data.vocabulary_sizes, f_measure_vals, marker='$...$', color='blue')
+            a = axes[i].scatter(graph_data.vocabulary_sizes, accuracy_vals, marker='*', color='r')
+            p = axes[i].scatter(graph_data.vocabulary_sizes, precision_vals, marker='X', color='green')
+            r = axes[i].scatter(graph_data.vocabulary_sizes, recall_vals, marker='2', color='orange')
+            f = axes[i].scatter(graph_data.vocabulary_sizes, f_measure_vals, marker='$...$', color='blue')
+            plt.legend([a, p, r, f], ['accuracy', 'precision', 'recall', 'f-score'])
             axes[i].set_xlabel('Vocabulary Size')
             axes[i].set_ylabel('Classification Success Rate')
+            if i == 0:
+                axes[i].set_title('Least frequent Words Classifier Experiment')
+            else:
+                axes[i].set_title('Most frequent Words Classifier Experiment')
 
-        plt.title('Infrequent Words Classifier Experiment')
+        fig = matplotlib.pyplot.gcf()
+        fig.set_size_inches(18.5, 10.5, forward=True)
+        fig.savefig('./generated-data/infrequent_words_graph.png', dpi=250)
         plt.show()
 
     def classify_test_dataset(self):
@@ -700,11 +707,9 @@ class NaiveBayesianClassifier:
             self.dataset_test.write_test_results_to_file(experiment_type)
             self.display_test_result()
         else:
-            pass
-            # TODO: FIX BUG
-            # self.generate_least_frequent_word_filtering()
-            # self.generate_most_frequent_word_filtering()
-            # self.plot_infrequent_words_results([self.word_filtering_graph_data_1, self.word_filtering_graph_data_2])
+            self.generate_least_frequent_word_filtering()
+            self.generate_most_frequent_word_filtering()
+            self.plot_infrequent_words_results([self.word_filtering_graph_data_1, self.word_filtering_graph_data_2])
 
 def prompt_user_dataset_file_name():
     filename = './data/'
