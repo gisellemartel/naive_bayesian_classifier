@@ -556,7 +556,7 @@ class NaiveBayesianClassifier:
             accuracy_vals = graph_data.classifier_scores['accuracy']
             precision_vals = graph_data.classifier_scores['precision']
             recall_vals = graph_data.classifier_scores['recall']
-            f_measure_vals = graph_data.classifier_scores['f-measure']
+            f_measure_vals = graph_data.classifier_scores['f-score']
             axes[i].scatter(graph_data.vocabulary_sizes, accuracy_vals, marker='*', color='r')
             axes[i].scatter(graph_data.vocabulary_sizes, precision_vals, marker='X', color='green')
             axes[i].scatter(graph_data.vocabulary_sizes, recall_vals, marker='2', color='orange')
@@ -564,7 +564,7 @@ class NaiveBayesianClassifier:
             axes[i].set_xlabel('Vocabulary Size')
             axes[i].set_ylabel('Classification Success Rate')
 
-        fig.title('Infrequent Words Classifier Experiment')
+        plt.title('Infrequent Words Classifier Experiment')
         plt.show()
 
     def classify_test_dataset(self):
@@ -595,10 +595,10 @@ class NaiveBayesianClassifier:
             y_true.append(document.true_class)
 
 
-            self.classification_success_rates['accuracy'] = accuracy_score(y_true, y_pred)
-            self.classification_success_rates['precision'] = precision_score(y_true, y_pred, average='macro')
-            self.classification_success_rates['f-score'] = f1_score(y_true, y_pred, average='macro')
-            self.classification_success_rates['recall'] = recall_score(y_true, y_pred, average='macro')
+        self.classification_success_rates['accuracy'] = accuracy_score(y_true, y_pred)
+        self.classification_success_rates['precision'] = precision_score(y_true, y_pred, average='macro')
+        self.classification_success_rates['f-score'] = f1_score(y_true, y_pred, average='macro')
+        self.classification_success_rates['recall'] = recall_score(y_true, y_pred, average='macro')
 
     def do_experiment(self, experiment_type):
         if experiment_type != ExperimentType.INFREQUENT_WORDS:
@@ -613,7 +613,7 @@ class NaiveBayesianClassifier:
         else:
             self.generate_least_frequent_word_filtering()
             # self.generate_most_frequent_word_filtering()
-            self.plot_infrequent_words_results()
+            self.plot_infrequent_words_results([self.word_filtering_graph_data_1, self.word_filtering_graph_data_2])
 
 
 def main():
