@@ -433,7 +433,7 @@ class NaiveBayesianClassifier:
                 rejected_words = [c for c in rejected_chars]
 
                 self.sanitized_model_documents.append(
-                    ModelDocument(document, sanitized_document, rejected_words, classifier))
+                    ModelDocument(document, sanitized_document.split(), rejected_words, classifier))
 
                 # determine the frequency of each word for each classifier for model
                 if classifier not in self.dataset_model.num_docs_per_classifier:
@@ -493,7 +493,7 @@ class NaiveBayesianClassifier:
                     rejected_words = [c for c in rejected_chars]
 
                     self.sanitized_model_documents.append(
-                        ModelDocument(document, sanitized_document, rejected_words, classifier))
+                        ModelDocument(document, sanitized_document.split(), rejected_words, classifier))
 
                     # determine the frequency of each word for each classifier for model
                     if classifier not in self.dataset_model.num_docs_per_classifier:
@@ -503,7 +503,7 @@ class NaiveBayesianClassifier:
                         self.dataset_model.num_docs_per_classifier[classifier] = current_num_docs + 1
                     model_doc_ctr += 1
                 else:
-                    self.dataset_test.documents.append(TestDocument(sanitized_document, classifier))
+                    self.dataset_test.documents.append(TestDocument(sanitized_document.split(), classifier))
 
         # set the total num of documents for the model (to be used later to calc probability of each class)
         self.dataset_model.total_documents = model_doc_ctr
@@ -518,7 +518,7 @@ class NaiveBayesianClassifier:
                 self.parse_stop_words_from_file()
 
             for i, doc in enumerate(self.sanitized_model_documents):
-                words_in_doc = doc.sanitized_title.split()
+                words_in_doc = doc.sanitized_title
 
                 if experiment_type == ExperimentType.BASELINE:
                     self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
@@ -555,24 +555,21 @@ class NaiveBayesianClassifier:
 
     def generate_least_frequent_word_filtering(self):
         frequency_thresholds = [
-            -1, 1, 5, 10, 15, 20
+            1, 5, 10, 15, 20
         ]
 
         for freq in frequency_thresholds:
             # reset the vocabulary
             self.dataset_model.vocabulary = []
             for doc in self.sanitized_model_documents:
-                words_in_doc = doc.sanitized_title.split()
+                words_in_doc = doc.sanitized_title
                 self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
 
             for classifier in self.dataset_model.classifiers:
                 for word in self.dataset_model.classifiers[classifier]:
                     frequency = self.dataset_model.classifiers[classifier][word]
-                    # no threshold
-                    if freq == -1:
-                        continue
                     # threshold > 1
-                    if freq != 1 and freq != -1 and frequency <= freq:
+                    if freq != 1 and frequency <= freq:
                         if word in self.dataset_model.vocabulary:
                             self.dataset_model.vocabulary.remove(word)
                         self.dataset_model.classifiers[classifier][word] = 0
@@ -605,7 +602,7 @@ class NaiveBayesianClassifier:
         # reset the vocabulary
         self.dataset_model.vocabulary = []
         for doc in self.sanitized_model_documents:
-            words_in_doc = doc.sanitized_title.split()
+            words_in_doc = doc.sanitized_title
             self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
 
         # collect all the frequencies and determine the  vals to removed according to % threshold
@@ -648,8 +645,8 @@ class NaiveBayesianClassifier:
             f_measure_vals = graph_data.classifier_scores['f-score']
             a = axes[i].scatter(graph_data.vocabulary_sizes, accuracy_vals, marker='*', color='r')
             p = axes[i].scatter(graph_data.vocabulary_sizes, precision_vals, marker='X', color='green')
-            r = axes[i].scatter(graph_data.vocabulary_sizes, recall_vals, marker='2', color='orange')
-            f = axes[i].scatter(graph_data.vocabulary_sizes, f_measure_vals, marker='$...$', color='blue')
+            r = axes[i].scatter(graph_data.vocabulary_sizes, recall_vals, marker='2', color='purple')
+            f = axes[i].scatter(graph_data.vocabulary_sizes, f_measure_vals, marker='H', color='blue')
             plt.legend([a, p, r, f], ['accuracy', 'precision', 'recall', 'f-score'])
             axes[i].set_xlabel('Vocabulary Size')
             axes[i].set_ylabel('Classification Success Rate')
@@ -673,7 +670,7 @@ class NaiveBayesianClassifier:
             max_score = -math.inf
             for classifier in self.dataset_model.classifiers:
                 score = self.dataset_model.classes_probabilities[classifier]
-                for word in document.title.split():
+                for word in document.title:
                     if word in self.dataset_model.vocabulary:
                         score = score + math.log10(self.dataset_model.conditional_probabilities[word][classifier])
                         document.class_scores[classifier] = score
@@ -692,9 +689,9 @@ class NaiveBayesianClassifier:
 
 
         self.classification_success_rates['accuracy'] = accuracy_score(y_true, y_pred)
-        self.classification_success_rates['precision'] = precision_score(y_true, y_pred, average='weighted')
-        self.classification_success_rates['recall'] = recall_score(y_true, y_pred, average='weighted')
-        self.classification_success_rates['f-score'] = f1_score(y_true, y_pred, average='weighted')
+        self.classification_success_rates['precision'] = precision_score(y_true, y_pred, average='macro')
+        self.classification_success_rates['recall'] = recall_score(y_true, y_pred, average='macro')
+        self.classification_success_rates['f-score'] = f1_score(y_true, y_pred, average='macro')
 
     def do_experiment(self, experiment_type):
         if experiment_type != ExperimentType.INFREQUENT_WORDS:
@@ -709,7 +706,7 @@ class NaiveBayesianClassifier:
         else:
             self.generate_least_frequent_word_filtering()
             self.generate_most_frequent_word_filtering()
-            self.plot_infrequent_words_results([self.word_filtering_graph_data_1, self.word_filtering_graph_data_2])
+            # self.plot_infrequent_words_results([self.word_filtering_graph_data_1, self.word_filtering_graph_data_2])
 
 def prompt_user_dataset_file_name():
     filename = './data/'
@@ -746,20 +743,20 @@ def main():
     classifier.do_experiment(ExperimentType.WORD_LEN)
     classifier.do_experiment(ExperimentType.INFREQUENT_WORDS)
 
-    file_name = prompt_user_dataset_file_name()
-    gen_new_test_data = prompt_user_test_data()
-
-    # if the user wants to generate both new model and training set
-    if gen_new_test_data:
-        classifier.parse_data_baseline(file_name)
-    # generate new model only using previously stored testing set
-    else:
-        classifier.generate_new_model(file_name)
-
-    classifier.do_experiment(ExperimentType.BASELINE)
-    classifier.do_experiment(ExperimentType.STOP_WORD)
-    classifier.do_experiment(ExperimentType.WORD_LEN)
-    classifier.do_experiment(ExperimentType.INFREQUENT_WORDS)
+    # file_name = prompt_user_dataset_file_name()
+    # gen_new_test_data = prompt_user_test_data()
+    #
+    # # if the user wants to generate both new model and training set
+    # if gen_new_test_data:
+    #     classifier.parse_data_baseline(file_name)
+    # # generate new model only using previously stored testing set
+    # else:
+    #     classifier.generate_new_model(file_name)
+    #
+    # classifier.do_experiment(ExperimentType.BASELINE)
+    # classifier.do_experiment(ExperimentType.STOP_WORD)
+    # classifier.do_experiment(ExperimentType.WORD_LEN)
+    # classifier.do_experiment(ExperimentType.INFREQUENT_WORDS)
 
 
 if __name__ == '__main__':
