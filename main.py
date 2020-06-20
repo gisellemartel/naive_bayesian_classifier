@@ -452,7 +452,7 @@ class NaiveBayesianClassifier:
 
     def generate_least_frequent_word_filtering(self):
         frequency_thresholds = [
-            1, 5, 10, 15, 20
+            -1, 1, 5, 10, 15, 20
         ]
 
         for freq in frequency_thresholds:
@@ -462,17 +462,22 @@ class NaiveBayesianClassifier:
                 words_in_doc = doc.sanitized_title.split()
                 self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
 
-                if len(doc.rejected_words) > 0:
-                    rejected_words_line = '\t'.join(w for w in doc.rejected_words)
-                else:
-                    rejected_words_line = ""
-                self.dataset_model.rejected_words.append(rejected_words_line)
-
             for classifier in self.dataset_model.classifiers:
                 for word in self.dataset_model.classifiers[classifier]:
                     frequency = self.dataset_model.classifiers[classifier][word]
-                    if frequency <= freq and frequency > 0 and word in self.dataset_model.vocabulary:
-                        self.dataset_model.vocabulary.remove(word)
+                    # no threshold
+                    if freq == -1:
+                        continue
+                    # threshold > 1
+                    if freq != 1 and freq != -1 and frequency <= freq:
+                        if word in self.dataset_model.vocabulary:
+                            self.dataset_model.vocabulary.remove(word)
+                        self.dataset_model.classifiers[classifier][word] = 0
+                        self.dataset_model.total_word_count_foreach_class[classifier] -= 1
+                    # threshold == 1
+                    elif freq == 1 and frequency == 1:
+                        if word in self.dataset_model.vocabulary:
+                            self.dataset_model.vocabulary.remove(word)
                         self.dataset_model.classifiers[classifier][word] = 0
                         self.dataset_model.total_word_count_foreach_class[classifier] -= 1
 
@@ -484,36 +489,68 @@ class NaiveBayesianClassifier:
                 scores = self.word_filtering_graph_data_1.classifier_scores[measurement_type]
                 scores.append(self.classification_success_rate)
 
-
     def generate_most_frequent_word_filtering(self):
-        frequency_thresholds = [
-            0.05, 0.10, 0.15, 0.20, 0.25
-        ]
+        # top 5%, 10%, 15%, etc frequent words
+        top_percentile_cutoffs = {
+            0.05,
+            0.10,
+            0.15,
+            0.20,
+            0.25
+        }
 
-        for freq in frequency_thresholds:
-            # reset the vocabulary
-            self.dataset_model.vocabulary = []
-            for i, doc in enumerate(self.sanitized_model_documents):
-                pass
+        # reset the vocabulary
+        self.dataset_model.vocabulary = []
+        for doc in self.sanitized_model_documents:
+            words_in_doc = doc.sanitized_title.split()
+            self.dataset_model.generate_frequency_maps(doc.classifier, words_in_doc)
 
-            # TODO: parse the vocab size as x values, and the score as y-values
+        # collect all the frequencies and determine the  vals to removed according to % threshold
+        frequencies = []
+        for classifier in self.dataset_model.classifiers:
+            for word in self.dataset_model.classifiers[classifier]:
+                frequency = self.dataset_model.classifiers[classifier][word]
+                frequencies.append(frequency)
+        # sort from lowest to highest frequency
+        frequencies.sort()
+
+        for percentile in top_percentile_cutoffs:
+            # get the freq cutoff based on percentile
+            cutoff = math.ceil(percentile*len(frequencies))
+            # cutoff the top X% frequent words
+            cutoff_frequency = frequencies[len(frequencies) - cutoff]
+
+            for classifier in self.dataset_model.classifiers:
+                for word in self.dataset_model.classifiers[classifier]:
+                    if self.dataset_model.classifiers[classifier][word] == cutoff_frequency:
+                        if word in self.dataset_model.vocabulary:
+                            self.dataset_model.vocabulary.remove(word)
+                        self.dataset_model.classifiers[classifier][word] = 0
+                        self.dataset_model.total_word_count_foreach_class[classifier] -= 1
+
+            self.dataset_model.train_dataset_model()
             self.word_filtering_graph_data_2.vocabulary_sizes.append(len(self.dataset_model.vocabulary))
 
-        self.dataset_model.train_dataset_model()
-        self.classify_test_dataset()
+            for measurement_type in self.word_filtering_graph_data_2.classifier_scores:
+                self.classify_test_dataset(measurement_type)
+                scores = self.word_filtering_graph_data_2.classifier_scores[measurement_type]
+                scores.append(self.classification_success_rate)
 
-    def plot_infrequent_words_results(self):
-        accuracy_vals = self.word_filtering_graph_data_1.classifier_scores['accuracy']
-        precision_vals = self.word_filtering_graph_data_1.classifier_scores['precision']
-        recall_vals = self.word_filtering_graph_data_1.classifier_scores['recall']
-        f_measure_vals = self.word_filtering_graph_data_1.classifier_scores['f-measure']
-        plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, accuracy_vals, marker='*', color='r')
-        plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, precision_vals, marker='X', color='green')
-        plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, recall_vals, marker='2', color='orange')
-        plt.scatter(self.word_filtering_graph_data_1.vocabulary_sizes, f_measure_vals, marker='$...$', color='blue')
-        plt.xlabel('Vocabulary Size')
-        plt.ylabel('Classification Success Rate')
-        plt.title('Infrequent Words Classifier Experiment')
+    def plot_infrequent_words_results(self, graphs_data):
+        fig, axes = plt.subplots(1, len(graphs_data))
+        for i, graph_data in enumerate(graphs_data):
+            accuracy_vals = graph_data.classifier_scores['accuracy']
+            precision_vals = graph_data.classifier_scores['precision']
+            recall_vals = graph_data.classifier_scores['recall']
+            f_measure_vals = graph_data.classifier_scores['f-measure']
+            axes[i].scatter(graph_data.vocabulary_sizes, accuracy_vals, marker='*', color='r')
+            axes[i].scatter(graph_data.vocabulary_sizes, precision_vals, marker='X', color='green')
+            axes[i].scatter(graph_data.vocabulary_sizes, recall_vals, marker='2', color='orange')
+            axes[i].scatter(graph_data.vocabulary_sizes, f_measure_vals, marker='$...$', color='blue')
+            axes[i].set_xlabel('Vocabulary Size')
+            axes[i].set_ylabel('Classification Success Rate')
+
+        fig.title('Infrequent Words Classifier Experiment')
         plt.show()
 
     def classify_test_dataset(self, score_type = 'accuracy'):
@@ -546,11 +583,11 @@ class NaiveBayesianClassifier:
         if score_type == 'accuracy':
             self.classification_success_rate = accuracy_score(y_true, y_pred)
         elif score_type == 'precision':
-            self.classification_success_rate = precision_score(y_true, y_pred, average='weighted')
+            self.classification_success_rate = precision_score(y_true, y_pred, average='macro')
         elif score_type == 'f-score':
-            self.classification_success_rate = f1_score(y_true, y_pred, average='weighted')
+            self.classification_success_rate = f1_score(y_true, y_pred, average='macro')
         elif score_type == 'recall':
-            self.classification_success_rate = recall_score(y_true, y_pred, average='weighted')
+            self.classification_success_rate = recall_score(y_true, y_pred, average='macro')
 
     def do_experiment(self, experiment_type):
         if experiment_type != ExperimentType.INFREQUENT_WORDS:
@@ -563,9 +600,8 @@ class NaiveBayesianClassifier:
             self.dataset_test.write_test_results_to_file(experiment_type)
             self.display_test_result()
         else:
-            #TODO: finish!!!!!
             self.generate_least_frequent_word_filtering()
-            # self.generate_most_frequent_word_filtering()
+            self.generate_most_frequent_word_filtering()
             self.plot_infrequent_words_results()
 
 
